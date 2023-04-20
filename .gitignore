@@ -41,3 +41,6 @@ vignettes/*.pdf
 # We don't want to upload the input data or outputs to Github
 input/
 output/
+
+# PyCharm configuration files
+.idea/
