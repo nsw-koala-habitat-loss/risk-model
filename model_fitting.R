@@ -10,6 +10,13 @@ library(raster)
 library(exactextractr)
 library(terra)
 library(tidyverse)
+library(spdep)
+#if (!require("spDataLarge")) install.packages('spDataLarge', repos='https://nowosad.github.io/drat/', type='source')
+#library(spDataLarge)
+if (!require("INLA")) install.packages("INLA",repos=c(getOption("repos"),INLA="https://inla.r-inla-download.org/R/stable"), dep=TRUE)
+library(INLA)
+#library(bigDM)
+if (!require("diseasmapping")) install.packages("diseasemapping", repos="http://R-Forge.R-project.org")
 
 # load functions
 source("functions.R")
@@ -48,3 +55,36 @@ ZStats_Woody <- map2(.x = SUs, .y = CropRast, .f = get_zonal, Stat = "sum")
 
 # round to the nearest integer
 ZStats_Woody <- map(.x = ZStats_Woody, .f = round)
+
+# create adjacency matrices - COMMENTED OUT FOR NOW AS AGACENCY MATRIX TOO LARGE
+#Adjacency <- map2(.x = SUs, .y = names(SUs), .f = get_adjacency, FileLocation = "output/neighbours/")
+
+# TEST RUN OF AGRICULTURAL CLEARING MODEL FOR CENTRAL COAST
+
+# get attribute table of spatial units
+Covs <- SUs$CC %>% st_drop_geometry() %>% as_tibble() %>% mutate(Area = Shape_Area / 10000) %>% select(-KMR, - X, -Y, -Shape_Length, -Shape_Area)
+
+# add area ID
+Covs$areaID <- 1:nrow(Covs)
+
+# get response data
+Response <- ZStats_Woody$CC %>% mutate(YAg = sum.aloss, YIn = sum.iloss, YFo = sum.floss, N = sum.woody) %>%
+              mutate(N = ifelse(N < YAg + YIn + YFo, YAg + YIn + YFo, N)) %>%select(-sum.aloss, -sum.iloss, -sum.floss, -sum.woody)
+
+# set up data for INLA model
+R <- Response %>% select(YAg) %>% as.matrix()
+NT <- Response %>% select(N) %>% as.matrix()
+C <- Covs %>% select(Area) %>% mutate(Area = as.numeric(scale(Area)))
+DataAg <- get_zib_format(R, NT, C)
+
+# fit clearing versus no clearing model on its own
+formula <- P ~ 0 + IntP + AreaP
+ResultP <- inla(formula, data = DataAg, family = "binomial", Ntrials = NtrialsP, control.inla=list(control.vb = list(enable = FALSE)), verbose = TRUE)
+
+# fit amount of clearing | clearing model on its own
+formula <- N ~ 0 + IntN + AreaN
+ResultN <- inla(formula, data = DataAg, family = "zeroinflatedbinomial0", Ntrials = NtrialsN, verbose = TRUE, control.family=(list(hyper = list(prob = list(initial = -20, fixed = TRUE)))), control.inla = list(control.vb = list(enable = FALSE)))
+
+# fit combined ZIB model - NOTE THIS DOESN'T WORK AT THE MOMENT SO NEED TO FIX
+formula <- cbind(P, N) ~ 0 + IntP + IntN + AreaP + AreaN
+ResultZIB <- inla(formula, data = DataAg, family = c("binomial", "zeroinflatedbinomial0"), Ntrials = Ntrials, verbose = TRUE, control.family=list(list(), list(hyper = list(prob = list(initial = -20,fixed = TRUE)))), control.inla = list(control.vb = list(enable = FALSE)))
