@@ -22,21 +22,24 @@ library(INLA)
 # load functions
 source("functions.R")
 
-# load woody loss rasters ans create raster stack
+# get woody cover in 2011
+Woody <- terra::rast("input/woody_cover/woody_nsw.tif") %>% round()
 
+# load woody loss rasters and create raster stack
 
+# get all tif files
+WLFiles <- list.files("./input/clearing_data", pattern = "\\.tif$", full.names = TRUE)
+WLStack <- terra::rast(WLFiles) %>% round()
 
-
-Ag_Loss <- terra::rast(paste(getwd(), "/input/clearing_data/agr_loss_1119.tif",sep = ""))
-In_Loss <- terra::rast(paste(getwd(), "/input/clearing_data/inf_loss_1119.tif",sep = ""))
-Fo_Loss <- terra::rast(paste(getwd(), "/input/clearing_data/for_loss_1119.tif",sep = ""))
-Woody <- terra::rast(paste(getwd(), "/input/clearing_data/woody_11.tif",sep = "")) # woody in 2011
-Woody_Now <- terra::rast(paste(getwd(), "/input/clearing_data/woody_23.tif",sep = "")) # woody in 2023
+# slpit into the different types of clearing
+Ag_Loss <- WLStack %>% classify(cbind(c(1, 2, 3, 4), c(0, 1, 0, 0))) %>% max(na.rm = TRUE) %>% crop(Woody)
+In_Loss <- WLStack %>% classify(cbind(c(1, 2, 3, 4), c(0, 0, 1, 0))) %>% max(na.rm = TRUE) %>% crop(Woody)
+Fo_Loss <- WLStack %>% classify(cbind(c(1, 2, 3, 4), c(0, 0, 0, 1))) %>% max(na.rm = TRUE) %>% crop(Woody)
 
 # create raster stack of woody extent and loss
-Stack <- terra::rast(list(aloss = Ag_Loss, iloss = In_Loss, floss = Fo_Loss, woody = Woody, woody_now = Woody_Now))
+Stack <- terra::rast(list(aloss = Ag_Loss, iloss = In_Loss, floss = Fo_Loss, woody = Woody))
 
-# proposed covariates
+# proposed covariates based on workshops
 
 #Agriculture:
 #Land use
@@ -55,7 +58,7 @@ Stack <- terra::rast(list(aloss = Ag_Loss, iloss = In_Loss, floss = Fo_Loss, woo
 #Property size
 #Property value
 #Distance to nearest SUA
-#Population density - check integer values
+#Population density
 #Ecological condition
 #Slope
 
@@ -71,14 +74,39 @@ Stack <- terra::rast(list(aloss = Ag_Loss, iloss = In_Loss, floss = Fo_Loss, woo
 #Slope
 
 # load covariates
-# land value
-LVal <- terra::rast(paste(getwd(), "/input/covariates/Lot_value_tif_1.tif",sep = ""))
+
+# combined drought indicator
+Drought <- terra::rast("input/covariates/drought.tif")
 # elevation
-Elev <- terra::rast(paste(getwd(), "/input/covariates/DEM_Elev_Int_tif.tif",sep = ""))
-# % soil nitrogen
-Nit <- terra::rast(paste(getwd(), "/input/covariates/nto_00_raste_tif.tif",sep = ""))
-# land-use
-LUse <- terra::rast(paste(getwd(), "/input/covariates/NSWLanduse_2007_tif.tif",sep = ""))
+Elev <- terra::rast("input/covariates/elev.tif")
+# fire history (2011-2019)
+Fire <- terra::rast("input/covariates/fire.tif")
+# forest code
+ForCode <- terra::rast("input/covariates/forest_code.tif")
+# forest tenure
+ForTen <- terra::rast("input/covariates/forest_tenure.tif")
+# forest tenure type
+ForTenType <- terra::rast("input/covariates/forest_tenure_type.tif")
+# 2016 median household income weekly
+Income <- terra::rast("input/covariates/income.tif")
+# land use (NSW landuse 2013)
+LandUse <- terra::rast("input/covariates/landuse.tif")
+# population density
+PopDen <- terra::rast("input/covariates/pop_den.tif")
+# precipitation
+Precip <- terra::rast("input/covariates/prec.tif")
+# remoteness structure (ABS)
+Remote <- terra::rast("input/covariates/remoteness.tif")
+# slope
+Slope <- terra::rast("input/covariates/slope.tif")
+# soil fertility
+SoilFert <- terra::rast("input/covariates/soil_fert.tif")
+# soil nitrogen
+SoilNit <- terra::rast("input/covariates/soil_nitrogen.tif")
+# soil type
+SoilType <- terra::rast("input/covariates/soil_type.tif")
+# temperature
+Temp <- terra::rast("input/covariates/temp.tif")
 
 # create raster stack of continuous covariates
 StackCovsC <- terra::rast(list(LVal = LVal, Elev = Elev, Nit = Nit))
@@ -208,7 +236,7 @@ formula <- P ~ Area + LVal + Elev + Nit + f(SA1ID, model = "bym", graph = Adj, s
 ResultP <- inla(formula, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = TRUE)
 saveRDS(ResultP, file = "output/models/ModelP_CC_Ag.rds")
 
-# inspect model fit
+# inspect model
 summary(ResultP)
 ResultP$summary.fixed
 head(ResultP$summary.random$SA1ID)
