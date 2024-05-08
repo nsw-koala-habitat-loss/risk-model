@@ -134,10 +134,50 @@ predict_model <- function(KMR, Model, SpatUnits, CovsCD, Adjacency) {
 # Model = the fitted model (an output from fit_model)
 # SpatUnits = spatial units as list of Spatvector objects (properties) for each KMR that we want to predict for
 # CovsCD = covariates for each spatial unit to predict for as a list for each KMR
-# Adjacency = adjacency matrix for the SA1 (needs to be identical to the one used to fit the model)
+# Adjacency = adjacency matrix for the SA1s (needs to be identical to the one used to fit the model)
 
   # get the two model components
   ModelP <- Model[[1]]
   ModelN <- Model[[2]]
+
+  # get attribute table of spatial units and join covariates
+  Covs <- SpatUnits[[KMR]] %>% st_drop_geometry() %>% as_tibble() %>% select(-KMR, -Shape_Length, -Shape_Area, -Area) %>% bind_cols(CovsCD[[KMR]]) %>% mutate(SUID = 1:n())
+
+  # get response data and ensure clearing is < woody vegetation
+  Response <- RespData[[KMR]] %>% mutate(YAg = sum.aloss, YIn = sum.iloss, YFo = sum.floss, N = sum.woody) %>%
+             mutate(N = ifelse(N < YAg + YIn + YFo, YAg + YIn + YFo, N)) %>% select(-sum.aloss, -sum.iloss, -sum.floss, -sum.woody)
+
+  # set up data for INLA models
+
+  # response - how many cells cleared over time period
+  if (ClearType == 1) {
+    R <- Response %>% select(YAg) %>% as.matrix()
+  } else if (ClearType == 2) {
+    R <- Response %>% select(YIn) %>% as.matrix()
+  } else if (ClearType == 3) {
+    R <- Response %>% select(YFo) %>% as.matrix()
+  }
+
+  # number of trials - how many cells woody at start of time period
+  NT <- Response %>% select(N) %>% as.matrix()
+
+  # format data for model predictions for probability of clearing
+  RPPred <- R[which(NT > 0)] # only make predictions for properties with woody vegetation in 2011
+  RPPred <- as.vector(ifelse(RPPred > 0, 1, 0)) # recode to binary cleared/not cleared
+  NTPPred <- rep(1, length(RPPred)) # set number of trials to 1 for all properties
+  ResponsePPred <- as_tibble(cbind(RPPred, NTPPred))
+  names(ResponsePPred) <- c("P", "Ntrials")
+  CPPred <- C %>% left_join(CP %>% distinct(SA1, SA1ID), join_by(SA1 == SA1)) # recode indices for SA1s for random-effect (same IDs as for training data)
+  CPPred <- CPPred[which(NT > 0), ] # only make predictions for properties with woody vegetation in 2011
+  DataPPred <- bind_cols(ResponsePPred, CPPred)
+  DataPPred <- DataPPred %>% mutate(P = NA) # set whether cleared or not to NA so as to make predictions
+
+  # combine fitting and prediction data
+  DataP <- bind_rows(DataPPred, DataP)
+
+
+
+
+
 
 }
