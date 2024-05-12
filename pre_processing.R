@@ -103,6 +103,10 @@ SoilNit <- terra::rast("input/covariates/soil_nitrogen.tif")
 SoilType <- terra::rast("input/covariates/soil_type.tif")
 # temperature
 Temp <- terra::rast("input/covariates/temp.tif")
+# # Property size
+# PropSize <- terra::rast("input/covariates/prop_size.tif")
+# # Property value
+# PropVal <- terra::rast("input/covariates/prop_value.tif")
 
 # reclassify discrete covariates as appropriate
 
@@ -136,7 +140,7 @@ for (i in names(SUs)) {
   SUs[[i]] <- SUs[[i]] %>% mutate(Area = Shape_Area / 10000)
 }
 
-# save perocesses spatial units
+# save processes spatial units
 saveRDS(SUs, file = "output/spatial_units/sus.rds")
 
 # load SA1s spatial layer
@@ -197,3 +201,159 @@ for (i in names(ZStats_CovsD)) {
 
 # save data
 saveRDS(ZStats_CovsD, file = "output/data/ZStats_CovsD.rds")
+
+
+######################################
+# For checking normality of the data #
+######################################
+library(MASS)
+library(ggpubr)
+library(ggokabeito)
+theme_set(theme_pubr())
+
+# Read in all spatial units
+SUs <- readRDS("output/spatial_units/sus.rds")
+
+# Read in all continuous covariates
+ZStats_CovsC <- readRDS("output/data/ZStats_CovsC.rds")
+
+# Check for negative value in  continuous covariates 
+ZStats_CovsC_all <- do.call(rbind, ZStats_CovsC)
+map_dbl(ZStats_CovsC_all, min, na.rm = TRUE)
+
+# Include area in Continuous Covariates, remove units with area<0, +1+min(x) to all values
+for (i in names(ZStats_CovsC)) {
+  ZStats_CovsC[[i]] <- ZStats_CovsC[[i]] %>%
+    mutate(Area = SUs[[i]]$Area,
+           Elev = Elev+abs(floor(min(ZStats_CovsC_all$Elev, na.rm = TRUE))),
+           Income = Income+1,
+           PopDen = PopDen+1,
+           Slope = Slope+1) %>% 
+    filter(Area > 0)
+}
+
+# bind all continuous covariates for all spatial units
+ZStats_CovsC_all <- ZStats_CovsC
+for (i in names(ZStats_CovsC_all)) {
+  ZStats_CovsC_all[[i]] <- ZStats_CovsC_all[[i]] %>% mutate(KMR = i)
+}
+ZStats_CovsC_all <- do.call(rbind, ZStats_CovsC_all)
+
+# Create the histogram plot with facet_wrap
+hist_plot <- ggplot(ZStats_CovsC_long, aes(x = value)) +
+  geom_histogram(binwidth = 0.5, fill = "skyblue", color = "black") +
+  labs(title = "Histograms of Variables", x = "Value", y = "Frequency") +
+  facet_wrap(~name, scales = "free")
+
+# View the histogram plot
+hist_plot
+
+hist_Elev <- ggplot(ZStats_CovsC_all, aes(x = Elev, fill = KMR)) +
+  geom_histogram(binwidth = 10) +
+  scale_fill_okabe_ito()+
+  labs(x = "Elevation", y = "Frequency")+
+  theme(legend.position = "none")
+# hist_Elev
+
+hist_Income <- ggplot(ZStats_CovsC_all, aes(x = Income, fill = KMR)) +
+  geom_histogram(binwidth = 100) +
+  scale_fill_okabe_ito()+
+  labs(x = "Income", y = "Frequency")+
+  theme(legend.position = "none")
+# hist_Income
+
+hist_PopDen <- ggplot(ZStats_CovsC_all, aes(x = PopDen, fill = KMR)) +
+  geom_histogram(binwidth = 1000) +
+  scale_fill_okabe_ito()+
+  labs(x = "Population Density", y = "Frequency")+
+  theme(legend.position = "none")
+# hist_PopDen
+
+hist_Precip <- ggplot(ZStats_CovsC_all, aes(x = Precip, fill = KMR)) +
+  geom_histogram(binwidth = 10) +
+  scale_fill_okabe_ito()+
+  labs(x = "Precipitation", y = "Frequency")+
+  theme(legend.position = "none")
+hist_Precip
+
+hist_Slope <- ggplot(ZStats_CovsC_all, aes(x = Slope, fill = KMR)) +
+  geom_histogram(binwidth = 1) +
+  scale_fill_okabe_ito()+
+  labs(x = "Slope", y = "Frequency")+
+  theme(legend.position = "none")
+# hist_Slope
+
+hist_SoilNit <- ggplot(ZStats_CovsC_all, aes(x = SoilNit, fill = KMR)) +
+  geom_histogram(binwidth = 0.01) +
+  scale_fill_okabe_ito()+
+  labs(x = "Soil Nitrogen", y = "Frequency")+
+  theme(legend.position = "none")
+# hist_SoilNit
+
+hist_Temp <- ggplot(ZStats_CovsC_all, aes(x = Temp, fill = KMR)) +
+  geom_histogram(binwidth = 1) +
+  scale_fill_okabe_ito()+
+  labs(x = "Temperature", y = "Frequency")+
+  theme(legend.position = "none")
+# hist_Temp
+
+hist_Area <- ggplot(ZStats_CovsC_all, aes(x = Area, fill = KMR)) +
+  geom_histogram(binwidth = 10000) +
+  scale_fill_okabe_ito()+
+  labs(x = "Area", y = "Frequency")+
+  theme(legend.position = "none")
+# hist_Area
+
+hist_all <- ggarrange(hist_Elev, hist_Income, hist_PopDen, hist_Precip, hist_Slope, hist_SoilNit, hist_Temp, hist_Area, 
+                      ncol = 3, nrow = 3, common.legend = TRUE, legend="bottom")
+ggsave("hist_ZStats_CovsC.png", hist_all, width = 3000, height = 2000, units = "px", dpi = 300)
+
+
+
+ZStats_CovsC_LB <- data.frame(matrix(nrow = length(ZStats_CovsC), ncol = ncol(ZStats_CovsC[[1]])))
+colnames(ZStats_CovsC_LB) <- colnames(ZStats_CovsC_CC)
+rownames(ZStats_CovsC_LB) <- names(ZStats_CovsC)
+
+for(j in 1:length(ZStats_CovsC)){
+  for (i in 1:8) {
+    lm_mod <- lm(ZStats_CovsC[[j]][[i]] ~ 1, na.action = na.omit)
+    b <- boxcox(lm_mod, plotit = FALSE)
+    ZStats_CovsC_LB[j,i] <- b$x[which.max(b$y)]
+  }
+}
+
+ZStats_CovsC_all_LB <- data.frame(matrix(nrow = 1, ncol = ncol(ZStats_CovsC[[1]])))
+colnames(ZStats_CovsC_all_LB) <- colnames(ZStats_CovsC_CC)
+rownames(ZStats_CovsC_all_LB) <- "allKMR"
+
+for (i in 1:8) {
+    lm_mod <- lm(ZStats_CovsC_all[[i]] ~ 1, na.action = na.omit)
+    b <- boxcox(lm_mod, plotit = FALSE)
+    ZStats_CovsC_all_LB[1,i] <- b$x[which.max(b$y)]
+}
+
+ZStats_CovsC_LB <- rbind(ZStats_CovsC_LB, ZStats_CovsC_all_LB) %>% signif(1)
+
+ZStats_CovsC_LB_cl <- ZStats_CovsC_LB %>% signif(1) %>% 
+  mutate_all(function(x) {
+    ifelse(x <= -1.7, "1/x^2",
+           ifelse(x >= -1.3 & x <= -0.8, "1/x",
+                  ifelse(x >= -0.7 & x <= -0.3, "1/sqrt(x)",
+                         ifelse(x >= -0.2 & x <= 0.2, "log(x)",
+                                ifelse(x >= 0.3 & x <= 0.6, "sqrt(x)",
+                                       ifelse(x >= 0.7 & x <= 1.3, "x", 
+                                              ifelse(x >= 1.7, "x^2", x)))))))
+  })
+
+ZStats_CovsC_LB_tab <- ggtexttable(ZStats_CovsC_LB, theme = ttheme("blank")) %>%
+  tab_add_hline(at.row = 1:2, row.side = "top", linewidth = 2) %>% 
+  tab_add_hline(at.row = 10:11, row.side = "bottom", linewidth = 1) %>% 
+  tab_add_vline(at.column = c(1), column.side = "right", from.row = 2)
+ggsave("ZStats_CovsC_LB_tab.png", ZStats_CovsC_LB_tab, width = 3000, height = 2000, units = "px", dpi = 300, bg = 'white')
+
+ZStats_CovsC_LB_cl_tab <- ggtexttable(ZStats_CovsC_LB_cl, theme = ttheme("blank")) %>%
+  tab_add_hline(at.row = 1:2, row.side = "top", linewidth = 2) %>% 
+  tab_add_hline(at.row = 10:11, row.side = "bottom", linewidth = 1) %>% 
+  tab_add_vline(at.column = c(1), column.side = "right", from.row = 2)
+ggsave("ZStats_CovsC_LB_cl_tab.png", ZStats_CovsC_LB_cl_tab, width = 3000, height = 2000, units = "px", dpi = 300, bg = 'white')
+
