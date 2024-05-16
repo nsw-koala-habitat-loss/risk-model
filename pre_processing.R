@@ -8,8 +8,6 @@ library(exactextractr)
 library(terra)
 library(tidyverse)
 library(spdep)
-if (!require("INLA")) install.packages("INLA",repos=c(getOption("repos"),INLA="https://inla.r-inla-download.org/R/stable"), dep=TRUE)
-library(INLA)
 
 # load functions
 source("functions.R")
@@ -75,6 +73,7 @@ saveRDS(Stack, file = "output/raster_stacks/woodyextloss.rds")
 Drought <- terra::rast("input/covariates/drought.tif")
 # elevation
 Elev <- terra::rast("input/covariates/elev.tif")
+ELEV_NA <- not.na(Elev)
 # fire history (2011-2019)
 Fire <- terra::rast("input/covariates/fire.tif")
 # forest code
@@ -137,8 +136,13 @@ SUs <- list(CC = st_read("input/spatial_units/lots_kmrs.gdb", layer = "Central_C
 
 # add area to the spatial units attribute table
 for (i in names(SUs)) {
-  SUs[[i]] <- SUs[[i]] %>% mutate(Area = Shape_Area / 10000)
+  SUs[[i]]$Shape_Area <- as.numeric(st_area(SUs[[i]]))
+  SUs[[i]]$Area = SUs[[i]]$Shape_Area / 10000
 }
+
+# Check for Shape_Area < 0 
+All_SUs <- do.call(rbind, SUs)
+All_SUs[All_SUs$Shape_Area < 0,]
 
 # save processes spatial units
 saveRDS(SUs, file = "output/spatial_units/sus.rds")
@@ -202,7 +206,20 @@ for (i in names(ZStats_CovsD)) {
 # save data
 saveRDS(ZStats_CovsD, file = "output/data/ZStats_CovsD.rds")
 
+# combine SUs and Continuous covariates
+ZStats_CovsC_sf <- ZStats_CovsC
+for (i in names(ZStats_CovsC_sf)) {
+  ZStats_CovsC_sf[[i]] <- ZStats_CovsC_sf[[i]] %>% mutate(Shape = SUs[[i]]$Shape)
+}
 
+ZStats_CovsC_sf <- do.call(rbind, ZStats_CovsC_sf)
+st_write(ZStats_CovsC_sf, "input/ZStats_CovsC_sf.shp")
+summary(ZStats_CovsC_sf)
+ZStats_CovsC_sf_NULL <- ZStats_CovsC_sf %>% filter(is.na(Elev))
+
+ggplot()+geom_sf(data = SUs$CC, fill = "white", color = "black")
+
+sf_data <- st_as_sf(ZStats_CovsC_sf_NULL, wkt = "shape")
 ######################################
 # For checking normality of the data #
 ######################################
