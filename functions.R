@@ -10,6 +10,11 @@ get_zonal <- function(ZonalLayer, Raster, Stat) {
   return(as_tibble(exact_extract(Raster, ZonalLayer, Stat)))
 }
 
+# function to generate zonal statistics allowing larger cells in memory
+get_zonal2 <- function(ZonalLayer, Raster, Stat) {
+  return(as_tibble(exact_extract(Raster, ZonalLayer, Stat, max_cells_in_memory = 3.5e+08 )))
+}
+
 # function to create adjacency matrices
 get_adjacency <- function(SpatialUnits, Name, FileLocation) {
 
