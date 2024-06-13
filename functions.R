@@ -10,11 +10,6 @@ get_zonal <- function(ZonalLayer, Raster, Stat) {
   return(as_tibble(exact_extract(Raster, ZonalLayer, Stat)))
 }
 
-# function to generate zonal statistics allowing larger cells in memory
-get_zonal2 <- function(ZonalLayer, Raster, Stat) {
-  return(as_tibble(exact_extract(Raster, ZonalLayer, Stat, max_cells_in_memory = 3.5e+08 )))
-}
-
 # function to create adjacency matrices
 get_adjacency <- function(SpatialUnits, Name, FileLocation) {
 
@@ -68,25 +63,25 @@ fit_model <- function(KMR, ClearType, SpatUnits, RespData, CovsCD, SA1sPoly) {
 # SA1Poly = SA1s spatial representation as a list of Spatvector objectd for each KMR
 
   # get attribute table of spatial units and join covariates
-  Covs <- SpatUnits[[KMR]] %>% st_drop_geometry() %>% as_tibble() %>% select(-KMR, -Shape_Length, -Shape_Area, -Area) %>% bind_cols(CovsCD[[KMR]]) %>% mutate(SUID = 1:n())
+  Covs <- SpatUnits[[KMR]] %>% st_drop_geometry() %>% as_tibble() %>% dplyr::select(-KMR, -Shape_Length, -Shape_Area, -Area) %>% bind_cols(CovsCD[[KMR]]) %>% mutate(SUID = 1:n())
 
   # get response data and ensure clearing is < woody vegetation
   Response <- RespData[[KMR]] %>% mutate(YAg = sum.aloss, YIn = sum.iloss, YFo = sum.floss, N = sum.woody) %>%
-             mutate(N = ifelse(N < YAg + YIn + YFo, YAg + YIn + YFo, N)) %>% select(-sum.aloss, -sum.iloss, -sum.floss, -sum.woody)
+             mutate(N = ifelse(N < YAg + YIn + YFo, YAg + YIn + YFo, N)) %>% dplyr::select(-sum.aloss, -sum.iloss, -sum.floss, -sum.woody)
 
   # set up data for INLA models
 
   # response - how many cells cleared over time period
   if (ClearType == 1) {
-    R <- Response %>% select(YAg) %>% as.matrix()
+    R <- Response %>% dplyr::select(YAg) %>% as.matrix()
   } else if (ClearType == 2) {
-    R <- Response %>% select(YIn) %>% as.matrix()
+    R <- Response %>% dplyr::select(YIn) %>% as.matrix()
   } else if (ClearType == 3) {
-    R <- Response %>% select(YFo) %>% as.matrix()
+    R <- Response %>% dplyr::select(YFo) %>% as.matrix()
   }
 
   # number of trials - how many cells woody at start of time period
-  NT <- Response %>% select(N) %>% as.matrix()
+  NT <- Response %>% dplyr::select(N) %>% as.matrix()
 
   # probability of clearing model
 
@@ -101,12 +96,12 @@ fit_model <- function(KMR, ClearType, SpatUnits, RespData, CovsCD, SA1sPoly) {
   DataP <- bind_cols(ResponseP, CP)
 
   # get adjacency matrix for SA1s containing properties with forest cover
-  SA1IDs <- CP %>% select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
+  SA1IDs <- CP %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
   SA1sPolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
   Adj <- SA1sPolyKMR %>% get_adjacency(paste0("modelP_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), "output/neighbours/")
 
   # fit clearing versus no clearing model
-  formula <- as.formula(paste0(paste("P", paste(names(CP %>% select(-SA1, -SUID, -SA1ID)), collapse=" + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
+  formula <- as.formula(paste0(paste("P", paste(names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse=" + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
   ResultP <- inla(formula, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = TRUE)
 
   # proportion cleared|clearing model
@@ -121,12 +116,12 @@ fit_model <- function(KMR, ClearType, SpatUnits, RespData, CovsCD, SA1sPoly) {
   DataN <- bind_cols(ResponseN, CN)
 
   # get adjacency matrix for SA1s containing properties with some clearing
-  SA1IDs <- CN %>% select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
+  SA1IDs <- CN %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
   SA1PolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
   Adj <- SA1sPolyKMR %>% get_adjacency(paste0("modelN_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), "output/neighbours/")
 
   # fit proportion cleared|clearing model
-  formula <- as.formula(paste0(paste("Prop", paste(names(CN %>% select(-SA1, -SUID, -SA1ID)), collapse=" + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
+  formula <- as.formula(paste0(paste("Prop", paste(names(CN %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse=" + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
   ResultN <- inla(formula, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = TRUE)
 
   # return models
@@ -146,25 +141,25 @@ predict_model <- function(KMR, Model, SpatUnits, CovsCD, Adjacency) {
   ModelN <- Model[[2]]
 
   # get attribute table of spatial units and join covariates
-  Covs <- SpatUnits[[KMR]] %>% st_drop_geometry() %>% as_tibble() %>% select(-KMR, -Shape_Length, -Shape_Area, -Area) %>% bind_cols(CovsCD[[KMR]]) %>% mutate(SUID = 1:n())
+  Covs <- SpatUnits[[KMR]] %>% st_drop_geometry() %>% as_tibble() %>% dplyr::select(-KMR, -Shape_Length, -Shape_Area, -Area) %>% bind_cols(CovsCD[[KMR]]) %>% mutate(SUID = 1:n())
 
   # get response data and ensure clearing is < woody vegetation
   Response <- RespData[[KMR]] %>% mutate(YAg = sum.aloss, YIn = sum.iloss, YFo = sum.floss, N = sum.woody) %>%
-             mutate(N = ifelse(N < YAg + YIn + YFo, YAg + YIn + YFo, N)) %>% select(-sum.aloss, -sum.iloss, -sum.floss, -sum.woody)
+             mutate(N = ifelse(N < YAg + YIn + YFo, YAg + YIn + YFo, N)) %>% dplyr::select(-sum.aloss, -sum.iloss, -sum.floss, -sum.woody)
 
   # set up data for INLA models
 
   # response - how many cells cleared over time period
   if (ClearType == 1) {
-    R <- Response %>% select(YAg) %>% as.matrix()
+    R <- Response %>% dplyr::select(YAg) %>% as.matrix()
   } else if (ClearType == 2) {
-    R <- Response %>% select(YIn) %>% as.matrix()
+    R <- Response %>% dplyr::select(YIn) %>% as.matrix()
   } else if (ClearType == 3) {
-    R <- Response %>% select(YFo) %>% as.matrix()
+    R <- Response %>% dplyr::select(YFo) %>% as.matrix()
   }
 
   # number of trials - how many cells woody at start of time period
-  NT <- Response %>% select(N) %>% as.matrix()
+  NT <- Response %>% dplyr::select(N) %>% as.matrix()
 
   # format data for model predictions for probability of clearing
   RPPred <- R[which(NT > 0)] # only make predictions for properties with woody vegetation in 2011
