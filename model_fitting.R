@@ -11,6 +11,10 @@ library(tidyverse)
 library(spdep)
 if (!require("INLA")) install.packages("INLA",repos=c(getOption("repos"),INLA="https://inla.r-inla-download.org/R/stable"), dep=TRUE)
 library(INLA)
+library(GGally)
+library(ggpubr)
+library(confintr)
+library(readxl)
 
 # load functions
 source("functions.R")
@@ -22,14 +26,47 @@ ZStats_CovsD <- readRDS(file = "output/data/ZStats_CovsD.rds")
 SUs <- readRDS(file = "output/spatial_units/sus.rds")
 SA1s <- readRDS(file = "output/spatial_units/sa1s.rds")
 
+# # Load proposed covariates based on workshops from lookup xlsx
+# CovLookup <- readxl::read_xlsx("Input/covariates/covariate_description.xlsx", sheet = "AllLyr")
+
+
 # add area to the continuous covariates abd then rescale to have mean of zero and standard deviation of one
-# and check for multi-collinearity
 for (i in names(ZStats_CovsC)) {
   ZStats_CovsC[[i]] <- ZStats_CovsC[[i]] %>% mutate(Area = SUs[[i]]$Area)
-  ZStats_CovsC[[i]] <- ZStats_CovsC[[i]] %>% mutate_all(~as.numeric(scale(.)))
-  Corr_Cont <- cor(ZStats_CovsC[[i]], use = "complete.obs")
-  write.csv(Corr_Cont, file = paste0("output/collinearity/cor_cont_", i, ".csv"))
+  ZStats_CovsC[[i]] <- ZStats_CovsC[[i]] %>% mutate(across(-matches("PC"), ~as.numeric(scale(.))))
 }
+
+################################################################################
+#### SKIP THIS PART IF YOU ARE DO NOT NEED TO CHECK FOR MULTI-COLLINEARITY ####
+################################################################################
+ZStats_CovsC_all <- do.call(rbind, ZStats_CovsC)
+Corr_Cont <- cor(ZStats_CovsC_all, use = "complete.obs")
+Corr_Cont_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = Corr_Cont, label = TRUE, hjust = 1, layout.exp = 2)+ 
+  geom_point(size = 10, aes(color = coefficient > 0, alpha = abs(coefficient)> 0.5))+ 
+  scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) + 
+  guides(color = FALSE, alpha = FALSE)
+ggsave(Corr_Cont_all_plot, file = "output/collinearity/Corr_Cont_all_plot.png", width = 2000, height = 2000, units = "px")
+
+ZStats_CovsD_all <- do.call(rbind, ZStats_CovsD)
+str(ZStats_CovsD_all)
+
+cramers_v_matrix <- matrix(NA, nrow = ncol(ZStats_CovsD_all), ncol = ncol(ZStats_CovsD_all), 
+                           dimnames = list(names(ZStats_CovsD_all), names(ZStats_CovsD_all)))
+
+for (i in 1:ncol(ZStats_CovsD_all)) {
+  for(j in 1:ncol(ZStats_CovsD_all)) {
+    cramersv_val <- cramersv(as.data.frame(ZStats_CovsD_all[c(i,j)]))
+    cramers_v_matrix[i,j] <- cramersv_val
+  }
+}
+
+Corr_Categ_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = cramers_v_matrix, label = TRUE, hjust = 1, layout.exp = 2)+ 
+  geom_point(size = 10, aes(color = coefficient > 0, alpha = abs(coefficient)> 0.5))+ 
+  scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) + 
+  guides(color = FALSE, alpha = FALSE)
+ggsave(Corr_Categ_all_plot, file = "output/collinearity/Corr_Categ_all_plot.png", width = 2000, height = 2000, units = "px")
+
+################################################################################
 
 # combine continuous and discrete covariates into one tibble
 ZStats_Covs <- list()
@@ -38,25 +75,56 @@ for (i in 1:length(names(ZStats_CovsC))) {
 }
 names(ZStats_Covs) <- names(ZStats_CovsC)
 
-# DO SOMETHING HERE TO REMOVE VARIABLES THAT ARE COLLINEAR - FEI TO WORK ON THIS
-# SUGGEST REMOVE VARIABLES WITH CORRELATION > 0.7 OR < -0.7 (or 0.6?)
-# REMOVE RELEVANT COLUMNS FROM ZStats_CovsC FOR EACH KMR
+
+# DO SOMETHING HERE TO REMOVE VARIABLES THAT ARE COLLINEAR - FEI TO WORK ON THIS -DONE
+# SUGGEST REMOVE VARIABLES WITH CORRELATION > 0.7 OR < -0.7 (or 0.6?) -DONE
+# REMOVE RELEVANT COLUMNS FROM ZStats_CovsC FOR EACH KMR -DONE
 # PROBABLY CAN'T COMPLETELY AUTOMATE THIS STEP
 # EXAMPLE SUCH AS THIS TO SELECT SUBSET OF COVARIATES
-for (i in names(ZStats_CovsC)) {
-    ZStats_Covs[[i]] <- ZStats_Covs[[i]] %>% select(Elev)
+
+for (i in names(ZStats_Covs)) {
+    ZStats_Covs[[i]] <- ZStats_Covs[[i]] %>% dplyr::select(-c(Elev, ForType, Drought))
 }
 
-# NEED TO CHANGE COVARIATES FOR EACH CLEARING TYPE HERE - FEI TO WORK ON THIS
 
+#### Work in Progress ####
+# NEED TO CHANGE COVARIATES FOR EACH CLEARING TYPE HERE - FEI TO WORK ON THIS 
+ZStats_Covs_Ag <- ZStats_Covs
+for (i in names(ZStats_Covs_Ag)) {
+    ZStats_Covs_Ag[[i]] <- ZStats_Covs_Ag[[i]] %>%
+    dplyr::select(PopDen, ScEc_PC1, ScEc_PC2, ScEc_PC3, ScEc_PC4, ScEc_PC5, DistRoad, DistCity, PropVal, AgProf,Soil_PC1, Soil_PC2, Soil_PC3, slope, Precip, Temp, EcolCond, Area, LandTen, NatVegReg, LandUse, Fire)
+}
+
+ZStats_Covs_In <- ZStats_Covs
+for (i in names(ZStats_Covs_In)) {
+  ZStats_Covs_In[[i]] <- ZStats_Covs_In[[i]] %>%
+    select(PopDen, PopGro, ScEc_PC1, ScEc_PC2, ScEc_PC3, ScEc_PC4, ScEc_PC5, DistRoad, DistCity, PropVal, AgProf,Soil_PC1, Soil_PC2, Soil_PC3, slope, Precip, Temp, EcolCond, Area, PolPref, LandTen,  PlanZone, LandUse, Fire)
+}
+
+ZStats_Covs_Fo <- ZStats_Covs
+for (i in names(ZStats_Covs_Fo)) {
+  ZStats_Covs_Fo[[i]] <- ZStats_Covs_Fo[[i]] %>%
+    select(PopDen, ScEc_PC1, ScEc_PC2, ScEc_PC3, ScEc_PC4, ScEc_PC5, DistRoad, DistCity, PropVal, AgProf,Soil_PC1, Soil_PC2, Soil_PC3, slope, Precip, Temp, EcolCond, Area, PolPref, LandTen, ForTen, NatVegReg, LandUse, Fire)
+}
 
 # MODEL FITTING STEPS - STILL WORKING ON THIS
 
-# fit models for each KMR
+# Fit models for each KMR
 
 Test <- fit_model(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs, SA1sPoly = SA1s)
 
-# do model selection
+Test_2 <- fit_model(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s)
+summary(Test_2)
+
+
+# do model selection  ## Fei to try wrting this part ##
+
+## if 
+## 1 DIC of model with full set of covariates
+## 2 DIC of model with reduced set of covariates
+## if 2 < 1 then keep reduced set of covariates
+## if 2 > 1 then keep full set of covariates
+## Continue until no further reduction in DIC
 
 
 
