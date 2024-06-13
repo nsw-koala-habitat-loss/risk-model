@@ -186,8 +186,8 @@ for(i in 1:nrow(CovLookup)){
 }    
 
 # create raster stack of discrete covariates
-StackCovsD <- terra::rast(list(PolPref , LandTen, NSW_forten18_ForTen, NSW_forten18_ForType, NatVegReg , PlanZone , drought , fire   ))
-names(StackCovsD)[c(7,8)] <- c("Drought", "Fire") 
+StackCovsD <- terra::rast(list(PolPref , LandTen, NSW_forten18_ForTen, NSW_forten18_ForType, NatVegReg , PlanZone, LandUse, drought , fire   ))
+names(StackCovsD)[8] <- "Drought" 
 
 # save raster stack
 saveRDS(StackCovsD, file = "output/raster_stacks/disc_covs.rds")
@@ -219,6 +219,8 @@ gc()
 ## This part onwards is for checking NAs and other summary stats ####
 # Combine SUs and Woody
 ZStats_Woody <- readRDS("output/data/ZStats_Woody.rds")
+lapply(ZStats_Woody, summary)
+
 ZStats_Woody_sf <- ZStats_Woody
 for (i in names(ZStats_Woody_sf)) {
   ZStats_Woody_sf[[i]] <- ZStats_Woody_sf[[i]] %>% mutate(Shape = SUs[[i]]$Shape)
@@ -226,6 +228,12 @@ for (i in names(ZStats_Woody_sf)) {
 
 # combine SUs and Continuous covariates
 ZStats_CovsC <- readRDS("output/data/ZStats_CovsC.rds")
+
+lapply(ZStats_CovsC, summary)
+
+ZStats_CovsC_all <- do.call(rbind, ZStats_CovsC) 
+summary(ZStats_CovsC_all)
+
 ZStats_CovsC_sf <- ZStats_CovsC
 for (i in names(ZStats_CovsC_sf)) {
   ZStats_CovsC_sf[[i]] <- ZStats_CovsC_sf[[i]] %>% mutate(Shape = SUs[[i]]$Shape)
@@ -250,6 +258,11 @@ summary(ZStats_CovsC_sf)
 
 # combine SUs and Discrete covariates
 ZStats_CovsD <- readRDS("output/data/ZStats_CovsD.rds")
+lapply(ZStats_CovsD, summary)
+
+ZStats_CovsD_all <- do.call(rbind, ZStats_CovsD)
+summary(ZStats_CovsD_all)
+
 ZStats_CovsD_sf <- ZStats_CovsD
 for (i in names(ZStats_CovsD_sf)) {
   ZStats_CovsD_sf[[i]] <- ZStats_CovsD_sf[[i]] %>% mutate(Shape = SUs[[i]]$Shape)
