@@ -126,22 +126,21 @@ summary(Test_2)
 ## if 2 > 1 then keep full set of covariates
 ## Continue until no further reduction in DIC
 
-
-
 # make predictions
 
+# JRR EXAMPLE FOR MAKING PREDICTIONS
 
+# fit model
+Fit <- fit_model(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s)
 
+# get predictions from model
+Preds <- predict_model(Fit)
 
+# visualise predictions
+plot(Preds$Layer)
 
-
-
-
-
-
-
-
-
+# save predictions
+st_write(Preds$Layer, "output/predictions/test.shp", delete_layer = TRUE)
 
 # OLD STUFF - PLEASE KEEP THIS FOR NOW
 
