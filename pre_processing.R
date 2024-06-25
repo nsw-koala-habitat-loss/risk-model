@@ -173,6 +173,8 @@ rm(list = c(CropRastCovsC, ZStats_CovsC))
 # tmpFiles(current=TRUE, orphan=TRUE, old=TRUE, remove=TRUE)
 gc()
 
+SUs <- readRDS("output/spatial_units/sus.rds")
+
 # Load proposed covariates based on workshops from lookup xlsx
 CovLookup <- readxl::read_xlsx("Input/covariates/covariate_description.xlsx", sheet = "AllLyr")
 
@@ -186,8 +188,7 @@ for(i in 1:nrow(CovLookup)){
 }    
 
 # create raster stack of discrete covariates
-StackCovsD <- terra::rast(list(PolPref , LandTen, NSW_forten18_ForTen, NSW_forten18_ForType, NatVegReg , PlanZone, LandUse, drought , fire   ))
-names(StackCovsD)[8] <- "Drought" 
+StackCovsD <- terra::rast(list(PolPref , LandTen, NSW_forten18_ForTen, NSW_forten18_ForType, NatVegReg , PlanZone, LandUse, drought , Fire   ))
 
 # save raster stack
 saveRDS(StackCovsD, file = "output/raster_stacks/disc_covs.rds")
