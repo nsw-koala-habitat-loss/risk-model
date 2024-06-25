@@ -91,6 +91,18 @@ saveRDS(ZStats_Woody, file = "output/data/ZStats_Woody.rds")
 rm(list = setdiff(ls(all.names = TRUE), "SUs"))
 gc()
 
+# Produce Woody loss vector ----
+SUs <- readRDS("output/spatial_units/sus.rds")
+ZStats_Woody <- readRDS("output/data/ZStats_Woody.rds")
+SUs_Woody <- list()
+for (i in 1:length(names(ZStats_Woody))){
+  SUs_Woody[[i]] <- bind_cols(SUs[[i]], ZStats_Woody[[i]])
+}
+SUs_Woody <- do.call(rbind, SUs_Woody)
+
+saveRDS(SUs_Woody, file = "output/data/SUs_Woody.rds")
+
+# Preprocess covariates ----
 SUs <- readRDS("output/spatial_units/sus.rds")
 
 # # combined drought indicator
