@@ -15,6 +15,7 @@ library(GGally)
 library(ggpubr)
 library(confintr)
 library(readxl)
+library(tictoc)
 
 # load functions
 source("functions.R")
@@ -36,9 +37,17 @@ for (i in names(ZStats_CovsC)) {
   ZStats_CovsC[[i]] <- ZStats_CovsC[[i]] %>% mutate(across(-matches("PC"), ~as.numeric(scale(.))))
 }
 
-################################################################################
-#### SKIP THIS PART IF YOU ARE DO NOT NEED TO CHECK FOR MULTI-COLLINEARITY ####
-################################################################################
+# combine continuous and discrete covariates into one tibble
+ZStats_Covs <- list()
+for (i in 1:length(names(ZStats_CovsC))) {
+  ZStats_Covs[[i]] <- bind_cols(ZStats_CovsC[[i]], ZStats_CovsD[[i]])
+}
+names(ZStats_Covs) <- names(ZStats_CovsC)
+
+
+###################################################################
+#### SKIP THIS PART IF YOU ARE CHECKING FOR MULTI-COLLINEARITY ####
+###################################################################
 ZStats_CovsC_all <- do.call(rbind, ZStats_CovsC)
 Corr_Cont <- cor(ZStats_CovsC_all, use = "complete.obs")
 Corr_Cont_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = Corr_Cont, label = TRUE, hjust = 1, layout.exp = 2)+ 
@@ -68,13 +77,10 @@ ggsave(Corr_Categ_all_plot, file = "output/collinearity/Corr_Categ_all_plot.png"
 
 ################################################################################
 
-# combine continuous and discrete covariates into one tibble
-ZStats_Covs <- list()
-for (i in 1:length(names(ZStats_CovsC))) {
-    ZStats_Covs[[i]] <- bind_cols(ZStats_CovsC[[i]], ZStats_CovsD[[i]])
-}
-names(ZStats_Covs) <- names(ZStats_CovsC)
+# ZStats_Covs_all <- do.call(rbind, ZStats_Covs) %>% 
+#   mutate(Drought = as.integer(if_else(Drought %in% c(1,2,3,4,5), 1, 0)))
 
+# cor.test(ZStats_Covs_all$Precip, as.integer(ZStats_Covs_all$Drought), use = "complete.obs")
 
 # DO SOMETHING HERE TO REMOVE VARIABLES THAT ARE COLLINEAR - FEI TO WORK ON THIS -DONE
 # SUGGEST REMOVE VARIABLES WITH CORRELATION > 0.7 OR < -0.7 (or 0.6?) -DONE
@@ -83,11 +89,11 @@ names(ZStats_Covs) <- names(ZStats_CovsC)
 # EXAMPLE SUCH AS THIS TO SELECT SUBSET OF COVARIATES
 
 for (i in names(ZStats_Covs)) {
-    ZStats_Covs[[i]] <- ZStats_Covs[[i]] %>% dplyr::select(-c(Elev, ForType, Drought))
+    ZStats_Covs[[i]] <- ZStats_Covs[[i]] %>% dplyr::select(-c(Elev, ForType))
 }
 
 
-#### Work in Progress ####
+
 # NEED TO CHANGE COVARIATES FOR EACH CLEARING TYPE HERE - FEI TO WORK ON THIS 
 ZStats_Covs_Ag <- ZStats_Covs
 for (i in names(ZStats_Covs_Ag)) {
@@ -107,17 +113,27 @@ for (i in names(ZStats_Covs_Fo)) {
     select(PopDen, ScEc_PC1, ScEc_PC2, ScEc_PC3, ScEc_PC4, ScEc_PC5, DistRoad, DistCity, PropVal, AgProf,Soil_PC1, Soil_PC2, Soil_PC3, slope, Precip, Temp, EcolCond, Area, PolPref, LandTen, ForTen, NatVegReg, LandUse, Fire)
 }
 
-# MODEL FITTING STEPS - STILL WORKING ON THIS
+# MODEL FITTING STEPS
 
 # Fit models for each KMR
 
 Test <- fit_model(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs, SA1sPoly = SA1s)
 
+ptm <- proc.time()
 Test_2 <- fit_model(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s)
-summary(Test_2)
+proc.time() - ptm
+
+names(CP %>% dplyr::select(2))
+
+formula_1 <- as.formula(paste0(paste("P", paste(names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse=" + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
 
 
-# do model selection  ## Fei to try wrting this part ##
+summary(Test_2$PModel)
+Test_2$PModel$cpu.used
+
+ResultP$cpu[1]
+
+# do model selection  ## Fei to try writing this part ##
 
 ## if 
 ## 1 DIC of model with full set of covariates
@@ -125,6 +141,21 @@ summary(Test_2)
 ## if 2 < 1 then keep reduced set of covariates
 ## if 2 > 1 then keep full set of covariates
 ## Continue until no further reduction in DIC
+
+ptm <- proc.time()
+Test_3 <- Select_model(KMR = "CC", ClearType = 1, CovsCD = ZStats_Covs_Ag, Direction = "Backward", Verbose = FALSE)
+proc.time() - ptm
+
+# Running Best model:  P ~ PopDen + ScEc_PC1 + ScEc_PC2 + ScEc_PC3 + ScEc_PC4 + ScEc_PC5 +      DistRoad + DistCity + PropVal + Soil_PC1 + Soil_PC2 + Soil_PC3 +      slope + Precip + Temp + EcolCond + Area + LandTen + NatVegReg +      LandUse + Fire + f(SA1ID, model = "bym", graph = AdjP, scale.model = TRUE) 
+# Prop ~ PopDen + ScEc_PC1 + ScEc_PC2 + ScEc_PC3 + ScEc_PC4 + ScEc_PC5 +      DistRoad + DistCity + PropVal + Soil_PC1 + Soil_PC2 + Soil_PC3 +      slope + Precip + Temp + EcolCond + Area + LandTen + NatVegReg +      LandUse + Fire + f(SA1ID, model = "bym", graph = AdjN, scale.model = TRUE) 
+# Step: 4287.03 sec elapsed
+
+ptm <- proc.time()
+Test_5 <- Select_model(KMR = "CC", ClearType = 1, CovsCD = ZStats_Covs_Ag, Direction = "Forward", Verbose = FALSE)
+proc.time() - ptm
+
+Test_3A <- fit_model2(KMR = "CC", ClearType = 1, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Explanatory = "PopDen + ScEc_PC1 + ScEc_PC2 + ScEc_PC3 + ScEc_PC4 + ScEc_PC5 +      DistRoad + DistCity + PropVal + Soil_PC1 + Soil_PC2 + Soil_PC3 +      slope + Precip + Temp + EcolCond + Area + LandTen + NatVegReg +      LandUse + Fire", Verbose = FALSE)
+P ~ PopDen + ScEc_PC1 + ScEc_PC2 + ScEc_PC3 + ScEc_PC4 + ScEc_PC5 + DistRoad + DistCity + PropVal + AgProf + Soil_PC1 + Soil_PC2 + Soil_PC3 + slope + Precip + Temp + EcolCond + Area + LandTen + NatVegReg + LandUse + Fire + f(SA1ID, model = "bym", graph = AdjP,scale.model = TRUE)
 
 # make predictions
 
