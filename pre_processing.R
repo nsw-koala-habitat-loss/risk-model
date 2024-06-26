@@ -274,7 +274,7 @@ ZStats_CovsD <- readRDS("output/data/ZStats_CovsD.rds")
 lapply(ZStats_CovsD, summary)
 
 ZStats_CovsD_all <- do.call(rbind, ZStats_CovsD)
-summary(ZStats_CovsD_all)
+summary(ZStats_CovsD_all$PlanZone)
 
 ZStats_CovsD_sf <- ZStats_CovsD
 for (i in names(ZStats_CovsD_sf)) {
