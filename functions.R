@@ -330,7 +330,7 @@ predict_model <- function(Model) {
 }
 
 
-Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Direction = "Forward", Verbose = FALSE, max_inla_retries = 1) {
+Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Selection = "Forward", Verbose = FALSE, inla_retry = TRUE) {
   # function to fit model
   # KMR = text field for KMR - one of "CC", "CST", "DRP", "FW", "NC", "NT", "NS", "R", "SC"
   # ClearType = clearing type - one of 1 = agriculture, 2 = infrastructure, 3 = forestry
@@ -338,7 +338,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
   # RespData = response data consisting listr of clearing and woody vegetation data for each KMR
   # CovsCD = covariates for each spatial unit as a list for each KMR
   # SA1Poly = SA1s spatial representation as a list of Spatvector objectd for each KMR
-  # Direction = direction of model selection - one of "Forward", "F" or "Backward" "B"
+  # Selection = direction of model selection - one of "Forward", "F" or "Backward" "B" or "Complete Forward" "CF" or "Complete Backward" "CB"
   # Verbose = logical to print progress
   
   tic("Total Time")
@@ -397,7 +397,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
   SA1PolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
   AdjN <- SA1sPolyKMR %>% get_adjacency(paste0("modelN_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), "output/neighbours/")
   
-  if(Direction == "Forward" | Direction == "F"){
+  if(Selection == "Forward" | Selection == "F"){
     
     ####################################
     # Forward stepwise model selection #
@@ -405,7 +405,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
     
     tic("Forward Model Selection")
     # Get a list of Full explanatory variables and explanatory variables yet to be tested
-    left_explV_ls <- Full_explV_ls <- names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID))[1:5]
+    left_explV_ls <- Full_explV_ls <- names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID))
     # Placeholder for Selected explanatory variables and Best DIC
     Sel_explV_ls <- Best_DIC_ls <- list()
     
@@ -425,7 +425,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
     Current_dDIC <- Best_DIC - Current_DIC
     Best_dDIC <- 0
     
-    toc(log = TRUE)
+    toc(log = TRUE) # Null Model
     cat("Start:  DIC=", format(round(Current_DIC, 2)), "\n", deparse(ForP_H0), "\n", deparse(ForN_H0), "\n\n", sep = "")
     
     while(length(left_explV_ls) > 0){
@@ -440,13 +440,36 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
         ForP_H1 <- as.formula(paste0(paste("P", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
         tic("Current Model")
         cat("Running: ", deparse(ForP_H1), "\n", sep = "")
-        ResultP <- inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+        ResultP <- tryCatch({
+          inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+        }, error = function(e){
+          if(inla_retry == TRUE){
+            cat("Error in INLA model fitting. Retrying...\n")
+            Sys.sleep(3)
+            inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+          } else if (inla_retry == FALSE){
+            stop("Error in INLA model fitting. Exiting...\n")
+          }
+        })
+        
         
         # fit proportion cleared|clearing model
         ForN_H1 <- as.formula(paste0(paste("Prop", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
         cat(deparse(ForN_H1), "\n\n", sep = "")
-        ResultN <- inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-        toc(log = TRUE)
+        
+        ResultN <- tryCatch({
+          inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+        }, error = function(e){
+          if(inla_retry == TRUE){
+            cat("Error in INLA model fitting. Retrying...\n")
+            Sys.sleep(3)
+            inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+          } else if (inla_retry == FALSE){
+            stop("Error in INLA model fitting. Exiting...\n")
+          }
+        })
+        
+        toc(log = TRUE) # Current Model
         cat("\n\n", sep = "")
         
         # Calculate DIC for the current model and compare it with the best model
@@ -454,7 +477,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
         Current_dDIC <- Best_DIC - Current_DIC
         
         # Update the best DIC if the DIC of the current model is better
-        if(Current_dDIC > Best_dDIC){
+        if(Current_DIC < Best_DIC){
           Best_DIC <- Current_DIC
           Best_dDIC <- Current_dDIC
           Best_explV <- left_explV_ls[x]
@@ -470,7 +493,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
         Best_DIC_ls[length(Best_DIC_ls)+1] <- Best_DIC
         names(Best_DIC_ls)[length(Best_DIC_ls)] <- paste(unlist(Sel_explV_ls), collapse=" + ")
         # cat("\014")    
-        toc(log = TRUE)
+        toc(log = TRUE) # Step
         cat("Step:  DIC=", format(round(Best_DIC, 2)), "\n", 
             paste("P ~", paste(Sel_explV_ls, collapse = " + ")), "\n", paste("N ~", paste(Sel_explV_ls, collapse = " + ")), "\n\n", sep = "")
         flush.console()
@@ -478,11 +501,12 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
       }else{
         break
       }
-      toc(log = TRUE)
+      
     }
-  }
+    toc(log = TRUE) # Forward Model Selection
+    }
   
-  else if(Direction == "Backward" | Direction  == "B"){
+  else if(Selection == "Backward" | Selection  == "B"){
     
     ############################
     # Backward model selection #
@@ -511,7 +535,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
     Current_dDIC <- Best_DIC - Current_DIC
     Best_dDIC <- 0
     
-    toc(log = TRUE)
+    toc(log = TRUE) # Full Model
     cat("Start:  DIC=", format(round(Current_DIC, 2)), "\n", deparse(ForP_H0),"\n", deparse(ForN_H0), "\n\n", sep = "")
     
     
@@ -527,13 +551,37 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
         ForP_H1 <- as.formula(paste0(paste("P", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
         tic("Current Model")
         cat("Running: ", deparse(ForP_H1), "\n", sep = "")
-        ResultP <- inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+        
+        ResultP <- tryCatch({
+          inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+        }, error = function(e){
+          if(inla_retry == TRUE){
+            cat("Error in INLA model fitting. Retrying...\n")
+            Sys.sleep(3)
+            inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+          } else if (inla_retry == FALSE){
+            stop("Error in INLA model fitting. Exiting...\n")
+          }
+        })
+        
         
         # fit proportion cleared|clearing model
         ForN_H1 <- as.formula(paste0(paste("Prop", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
         cat(deparse(ForN_H1), "\n", sep = "")
-        ResultN <- inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-        toc(log = TRUE)
+        
+        ResultN <- tryCatch({
+          inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+        }, error = function(e){
+          if(inla_retry == TRUE){
+            cat("Error in INLA model fitting. Retrying...\n")
+            Sys.sleep(3)
+            inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+          } else if (inla_retry == FALSE){
+            stop("Error in INLA model fitting. Exiting...\n")
+          }
+        })
+        
+        toc(log = TRUE) # Current Model
         cat("\n\n", sep = "")
         
         # Calculate DIC for the current model and compare it with the best model
@@ -541,7 +589,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
         Current_dDIC <- Best_DIC - Current_DIC
         
         # Update the best DIC if the DIC of the current model is better
-        if(Current_dDIC > Best_dDIC){
+        if(Current < Best_DIC){
           Best_DIC <- Current_DIC
           Best_dDIC <- Current_dDIC
           Worst_explV <- Sel_explV_ls[x]
@@ -555,17 +603,134 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
         Best_DIC_ls[length(Best_DIC_ls)+1] <-  Best_DIC
         names(Best_DIC_ls)[length(Best_DIC_ls)] <- paste(unlist(Sel_explV_ls), collapse=" + ")
         # cat("\014")    
-        toc(log = TRUE)
+        toc(log = TRUE) # Step
         cat("Step:  DIC=", format(round(Best_DIC, 2)), "\n", 
             paste("P ~", paste(Sel_explV_ls, collapse = " + ")), "\n", paste("N ~", paste(Sel_explV_ls, collapse = " + ")), "\n\n", sep = "")
         flush.console()
       }else{
         break
       }
-      toc(log = TRUE)
+      toc(log = TRUE) # Backward Model Selection
     }
     
+  } else if (Selection == "Complete Forward" | Selection == "CF"){
+    
+    ####################################
+    # Forward complete model selection #
+    ####################################
+    
+    tic("Forward Complete Model Selection")
+    # Get a list of Full explanatory variables and explanatory variables yet to be tested
+    left_explV_ls <- Full_explV_ls <- names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID))
+    # Placeholder for Selected explanatory variables and Best DIC
+    Sel_explV_ls <- Best_DIC_ls <- list()
+    
+    # Null Model
+    tic("Null Model")
+    # fit clearing versus no clearing model 
+    ForP_H0 <- as.formula(paste0(paste("P", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
+    ResultP <- inla(ForP_H0, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    
+    # fit proportion cleared|clearing model
+    ForN_H0 <- as.formula(paste0(paste("Prop", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
+    ResultN <- inla(ForN_H0, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    
+    Current_DIC <- Best_DIC <- ResultP$dic$dic + ResultN$dic$dic
+    Best_DIC_ls[1] <- Best_DIC
+    names(Best_DIC_ls)[1] <- "H0"
+    
+    toc(log = TRUE) # null model
+    cat("Start:  DIC=", format(round(Current_DIC, 2)), "\n", deparse(ForP_H0), "\n", deparse(ForN_H0), "\n\n", sep = "")
+    
+    while(length(left_explV_ls) > 0){
+      tic("Step")
+      Best_explV <- NULL
+      Best_DIC <- Inf
+      
+      for(x in 1: length(left_explV_ls)){
+        
+        explV <- paste(c(Sel_explV_ls, left_explV_ls[x]), collapse=" + ")
+        
+        # fit clearing versus no clearing model 
+        ForP_H1 <- as.formula(paste0(paste("P", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
+        tic("Current Model")
+        cat("Running: ", deparse(ForP_H1), "\n", sep = "")
+        ResultP <- inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+        
+        ResultP <- tryCatch({
+          inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+        }, error = function(e){
+          if(inla_retry == TRUE){
+            cat("Error in INLA model fitting. Retrying...\n")
+            Sys.sleep(3)
+            inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+          } else if (inla_retry == FALSE){
+            stop("Error in INLA model fitting. Exiting...\n")
+          }
+        })
+        
+        # fit proportion cleared|clearing model
+        ForN_H1 <- as.formula(paste0(paste("Prop", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
+        cat(deparse(ForN_H1), "\n", sep = "")
+        
+        ResultN <- tryCatch({
+          inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+        }, error = function(e){
+          if(inla_retry == TRUE){
+            cat("Error in INLA model fitting. Retrying...\n")
+            Sys.sleep(3)
+            inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+          } else if (inla_retry == FALSE){
+            stop("Error in INLA model fitting. Exiting...\n")
+          }
+        })
+          
+        toc(log = TRUE) # current model
+        
+        # Calculate DIC for the current model and compare it with the best model
+        Current_DIC <- ResultP$dic$dic + ResultN$dic$dic
+        cat("DIC = ", Current_DIC, "\n\n", sep = "")
+        
+        # Update the best DIC if the DIC of the current model is better
+        if(Current_DIC < Best_DIC){
+          Best_DIC <- Current_DIC
+          Best_explV <- left_explV_ls[x]
+        }
+      }
+      
+      Sel_explV_ls <- c(Sel_explV_ls, Best_explV)
+      left_explV_ls <- setdiff(Full_explV_ls, Sel_explV_ls)
+      
+      Best_DIC_ls[length(Best_DIC_ls)+1] <- Best_DIC
+      names(Best_DIC_ls)[length(Best_DIC_ls)] <- paste(unlist(Sel_explV_ls), collapse=" + ")
+      # cat("\014")    
+      toc(log = TRUE) # Step
+      cat("Step:  DIC=", format(round(Best_DIC, 2)), "\n", 
+          paste("P ~", paste(Sel_explV_ls, collapse = " + ")), "\n", paste("N ~", paste(Sel_explV_ls, collapse = " + ")), "\n\n", sep = "")
+      
+      cat("Explanatory variable not tested yet: ", left_explV_ls, "\n\n", sep = "")
+    }
+  
+    
+  dDIC_ls <- list()
+  for(y in 1:(length(Best_DIC_ls)-1)){
+    dDIC_ls[y] <- Best_DIC_ls[[y]] - Best_DIC_ls[[y+1]]
+    names(dDIC_ls)[y] <- paste(names(Best_DIC_ls)[y+1])
   }
+  
+  Best_DIC_vec <- unlist(Best_DIC_ls)
+  dDIC_vec <- unlist(dDIC_ls)
+  
+  Best_DIC_vec <- Best_DIC_vec[dDIC_vec>2]
+  if(!is.null(Best_DIC_vec)){
+    Best_explvs <- names(Best_DIC_ls)[which.min(Best_DIC_vec)]
+    Sel_explV_ls <- unlist(strsplit(Best_explvs, " \\+ "))
+    }
+  else{Sel_explV_ls <- 1}
+  
+  toc(log = TRUE) # Forward Complete Model Selection
+  }
+  
   
   # Fit final model with selected explanatory variables
   # fit clearing versus no clearing model 
@@ -578,7 +743,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
   cat(deparse(ForN_H1), "\n")
   ResultN <- inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
   
-  toc(log = TRUE)
+  toc(log = TRUE) # Total Time
   # return models
   return(list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly, Best_DIC_ls = Best_DIC_ls))
 }
