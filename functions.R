@@ -135,7 +135,7 @@ fit_model <- function(KMR, ClearType, SpatUnits, RespData, CovsCD, SA1sPoly) {
 
 ## Same as fit_model but with additional control for Explanatory variables and Verbose, allow for debugging
 
-fit_model2 <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD, SA1sPoly = SA1s, Explanatory = "All", Verbose = TRUE) {
+fit_model2 <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD, SA1sPoly = SA1s, Explanatory = "All", Verbose = TRUE, OutputDir = NULL) {
   # function to fit model
   # KMR = text field for KMR - one of "CC", "CST", "DRP", "FW", "NC", "NT", "NS", "R", "SC"
   # ClearType = clearing type - one of 1 = agriculture, 2 = infrastructure, 3 = forestry
@@ -210,6 +210,11 @@ fit_model2 <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody,
   ResultN <- inla(formula, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
   
   # return models
+  if(!is.null(OutputDir)){
+    Model <- list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly)
+    output_FPath <- file.path(OutputDir, paste0("Model_", KMR, "_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, ".qs"))
+    qsave(Model, file = output_FPath)
+  }
   return(list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly))
 }
 
@@ -356,7 +361,7 @@ INLA_with_Retry <- function(N_retry=3, Initial_Tlimit = 1000,...){
   return(result)
 }
 
-Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Selection = "Forward", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000) {
+Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Selection = "Forward", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL) {
   # function to fit model
   # KMR = text field for KMR - one of "CC", "CST", "DRP", "FW", "NC", "NT", "NS", "R", "SC"
   # ClearType = clearing type - one of 1 = agriculture, 2 = infrastructure, 3 = forestry
@@ -672,12 +677,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
       cat("Step:  DIC=", format(round(Best_DIC, 2)), "\n", 
           paste("P ~", paste(Sel_explV_ls, collapse = " + ")), "\n", paste("N ~", paste(Sel_explV_ls, collapse = " + ")), "\n\n", sep = "")
       
-      cat("Explanatory variable not tested yet: ", left_explV_ls, "\n\n", sep = "")
-      
-      detach("package:INLA", unload = TRUE)
-      invisible(gc())
-      Sys.sleep(1)
-      suppressMessages(library(INLA))
+      cat("Explanatory variable not tested yet: ", paste(left_explV_ls, collapse = "+"), "\n\n", sep = "")
     }
     
     
@@ -688,9 +688,9 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
     }
     
     Best_DIC_vec <- unlist(Best_DIC_ls)
-    dDIC_vec <- unlist(dDIC_ls)
+    # dDIC_vec <- unlist(dDIC_ls)
     
-    Best_DIC_vec <- Best_DIC_vec[dDIC_vec>2]
+    # Best_DIC_vec <- Best_DIC_vec[dDIC_vec>2]
     if(!is.null(Best_DIC_vec)){
       Best_explvs <- names(Best_DIC_ls)[which.min(Best_DIC_vec)]
       Sel_explV_ls <- unlist(strsplit(Best_explvs, " \\+ "))
@@ -712,8 +712,12 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
   cat(deparse(ForN_H1), "\n")
   ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
   toc(log = TRUE) # Total Time
+  
   # return models
+  if(!is.null(OutputDir)){
+    Model <- list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly, Best_DIC_ls = Best_DIC_ls)
+    output_FPath <- file.path(OutputDir, paste0("SelModel_", KMR, "_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, Selection, ".qs"))
+    qsave(Model, file = output_FPath)
+  }
   return(list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly, Best_DIC_ls = Best_DIC_ls))
 }
-
-
