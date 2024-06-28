@@ -15,15 +15,25 @@ library(qs)
 source("functions.R")
 
 # load spatial property units for each KMR
-SUs <- list(CC = st_read("input/spatial_units/props_kmrs.gdb", layer = "Central_Coast"),
-            CST = st_read("input/spatial_units/props_kmrs.gdb", layer = "Central_Southern_Tablelands"),
-            DRP = st_read("input/spatial_units/props_kmrs.gdb", layer = "Darling_Riverine_Plains"),
-            FW = st_read("input/spatial_units/props_kmrs.gdb", layer = "Far_West"),
-            NC = st_read("input/spatial_units/props_kmrs.gdb", layer = "North_Coast"),
-            NT = st_read("input/spatial_units/props_kmrs.gdb", layer = "Northern_Tablelands"),
-            NS = st_read("input/spatial_units/props_kmrs.gdb", layer = "Northwest_Slopes"),
-            R = st_read("input/spatial_units/props_kmrs.gdb", layer = "Riverina"),
-            SC = st_read("input/spatial_units/props_kmrs.gdb", layer = "South_Coast"))
+# SUs <- list(CC = st_read("input/spatial_units/props_kmrs.gdb", layer = "Central_Coast"),
+#             CST = st_read("input/spatial_units/props_kmrs.gdb", layer = "Central_Southern_Tablelands"),
+#             DRP = st_read("input/spatial_units/props_kmrs.gdb", layer = "Darling_Riverine_Plains"),
+#             FW = st_read("input/spatial_units/props_kmrs.gdb", layer = "Far_West"),
+#             NC = st_read("input/spatial_units/props_kmrs.gdb", layer = "North_Coast"),
+#             NT = st_read("input/spatial_units/props_kmrs.gdb", layer = "Northern_Tablelands"),
+#             NS = st_read("input/spatial_units/props_kmrs.gdb", layer = "Northwest_Slopes"),
+#             R = st_read("input/spatial_units/props_kmrs.gdb", layer = "Riverina"),
+#             SC = st_read("input/spatial_units/props_kmrs.gdb", layer = "South_Coast"))
+
+SUs <- list(CC = st_read("input/spatial_units/lots_kmrs.gdb", layer = "Central_Coast"),
+            CST = st_read("input/spatial_units/lots_kmrs.gdb", layer = "Central_Southern_Tablelands"),
+            DRP = st_read("input/spatial_units/lots_kmrs.gdb", layer = "Darling_Riverine_Plains"),
+            FW = st_read("input/spatial_units/lots_kmrs.gdb", layer = "Far_West"),
+            NC = st_read("input/spatial_units/lots_kmrs.gdb", layer = "North_Coast"),
+            NT = st_read("input/spatial_units/lots_kmrs.gdb", layer = "Northern_Tablelands"),
+            NS = st_read("input/spatial_units/lots_kmrs.gdb", layer = "Northwest_Slopes"),
+            R = st_read("input/spatial_units/lots_kmrs.gdb", layer = "Riverina"),
+            SC = st_read("input/spatial_units/lots_kmrs.gdb", layer = "South_Coast"))
 
 # add area to the spatial units attribute table
 for (i in names(SUs)) {
