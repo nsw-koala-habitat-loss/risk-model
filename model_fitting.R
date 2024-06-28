@@ -120,6 +120,15 @@ for (i in names(ZStats_Covs_Fo)) {
 Test <- fit_model(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs, SA1sPoly = SA1s)
 
 ptm <- proc.time()
+TEST_t <- list()
+for (i in 1:10){
+  TEST_t[i] <- fit_model(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs, SA1sPoly = SA1s)
+  print(TEST_t[[i]]$dic$dic)
+}
+proc.time() - ptm
+
+
+ptm <- proc.time()
 Test_2 <- fit_model(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s)
 proc.time() - ptm
 
@@ -143,15 +152,17 @@ ResultP$cpu[1]
 ## Continue until no further reduction in DIC
 
 ptm <- proc.time()
-Test_3 <- Select_model(KMR = "CC", ClearType = 1, CovsCD = ZStats_Covs_Ag, Direction = "Backward", Verbose = FALSE)
+Test_3 <- Select_model(KMR = "CC", ClearType = 1, CovsCD = ZStats_Covs_Ag, Selection =  "F", Verbose = FALSE, inla_retry = TRUE)
 proc.time() - ptm
+# BEst Forward selection model
+# $`PopDen + LandUse + EcolCond + NatVegReg + Area + LandTen + DistCity + slope + Soil_PC1 + ScEc_PC4 + PropVal + Soil_PC3 + ScEc_PC3 + Temp`
+# [1] 13773.93
 
-# Running Best model:  P ~ PopDen + ScEc_PC1 + ScEc_PC2 + ScEc_PC3 + ScEc_PC4 + ScEc_PC5 +      DistRoad + DistCity + PropVal + Soil_PC1 + Soil_PC2 + Soil_PC3 +      slope + Precip + Temp + EcolCond + Area + LandTen + NatVegReg +      LandUse + Fire + f(SA1ID, model = "bym", graph = AdjP, scale.model = TRUE) 
-# Prop ~ PopDen + ScEc_PC1 + ScEc_PC2 + ScEc_PC3 + ScEc_PC4 + ScEc_PC5 +      DistRoad + DistCity + PropVal + Soil_PC1 + Soil_PC2 + Soil_PC3 +      slope + Precip + Temp + EcolCond + Area + LandTen + NatVegReg +      LandUse + Fire + f(SA1ID, model = "bym", graph = AdjN, scale.model = TRUE) 
-# Step: 4287.03 sec elapsed
+F_test2 <- INLA_with_TimeLimit(TimeLimit = 1000, ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+F_test1 <- INLA_with_Retry(N_retry = 3, Initial_Tlimit = 1000, ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
 
 ptm <- proc.time()
-Test_5 <- Select_model(KMR = "CC", ClearType = 1, CovsCD = ZStats_Covs_Ag, Direction = "Forward", Verbose = FALSE)
+Test_5 <- Select_model(KMR = "CC", ClearType = 1, CovsCD = ZStats_Covs_Ag, Selection = "Backward", Verbose = FALSE)
 proc.time() - ptm
 
 Test_3A <- fit_model2(KMR = "CC", ClearType = 1, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Explanatory = "PopDen + ScEc_PC1 + ScEc_PC2 + ScEc_PC3 + ScEc_PC4 + ScEc_PC5 +      DistRoad + DistCity + PropVal + Soil_PC1 + Soil_PC2 + Soil_PC3 +      slope + Precip + Temp + EcolCond + Area + LandTen + NatVegReg +      LandUse + Fire", Verbose = FALSE)
