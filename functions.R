@@ -330,7 +330,33 @@ predict_model <- function(Model) {
 }
 
 
-Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Selection = "Forward", Verbose = FALSE, inla_retry = TRUE) {
+INLA_with_TimeLimit <- function(TimeLimit,...){
+  setTimeLimit(cpu = TimeLimit, elapsed = TimeLimit, transient = TRUE)
+  inla(...)
+} 
+
+INLA_with_Retry <- function(N_retry=3, Initial_Tlimit = 1000,...){
+  retry <- as.integer(0)
+  result <- NULL
+  while(retry<=N_retry){
+    result <- tryCatch({
+      INLA_with_TimeLimit(TimeLimit = (Initial_Tlimit + (retry*500)), ...)}, 
+      error = function(e){
+        cat("Error in INLA model fitting. Retrying...", retry+1, "\n", sep = "")
+        Sys.sleep(1)
+        NULL
+      })
+    if(!is.null(result)){break} 
+    retry <- retry + 1
+    if(retry > N_retry){
+      stop("Error in INLA model fitting. Exceeded max number of retries \n")
+      break 
+    }
+  }
+  return(result)
+}
+
+Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Selection = "Forward", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000) {
   # function to fit model
   # KMR = text field for KMR - one of "CC", "CST", "DRP", "FW", "NC", "NT", "NS", "R", "SC"
   # ClearType = clearing type - one of 1 = agriculture, 2 = infrastructure, 3 = forestry
@@ -413,11 +439,11 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
     tic("Null Model")
     # fit clearing versus no clearing model 
     ForP_H0 <- as.formula(paste0(paste("P", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
-    ResultP <- inla(ForP_H0, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H0, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     
     # fit proportion cleared|clearing model
     ForN_H0 <- as.formula(paste0(paste("Prop", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
-    ResultN <- inla(ForN_H0, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H0, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     
     Current_DIC <- Best_DIC <- ResultP$dic$dic + ResultN$dic$dic
     Best_DIC_ls[1] <- Best_DIC
@@ -440,35 +466,13 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
         ForP_H1 <- as.formula(paste0(paste("P", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
         tic("Current Model")
         cat("Running: ", deparse(ForP_H1), "\n", sep = "")
-        ResultP <- tryCatch({
-          inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-        }, error = function(e){
-          if(inla_retry == TRUE){
-            cat("Error in INLA model fitting. Retrying...\n")
-            Sys.sleep(1)
-            inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-          } else if (inla_retry == FALSE){
-            stop("Error in INLA model fitting. Exiting...\n")
-          }
-        })
-        
+        ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
         
         # fit proportion cleared|clearing model
         ForN_H1 <- as.formula(paste0(paste("Prop", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
         cat(deparse(ForN_H1), "\n", sep = "")
         
-        ResultN <- tryCatch({
-          inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-        }, error = function(e){
-          if(inla_retry == TRUE){
-            cat("Error in INLA model fitting. Retrying...\n")
-            Sys.sleep(1)
-            inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-          } else if (inla_retry == FALSE){
-            stop("Error in INLA model fitting. Exiting...\n")
-          }
-        })
-        
+        ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
         toc(log = TRUE) # Current Model
         cat("\n", sep = "")
         
@@ -502,7 +506,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
         break
       }
       detach("package:INLA", unload = TRUE)
-      invisibly(gc())
+      invisible(gc())
       Sys.sleep(1)
       suppressMessages(library(INLA))
     }
@@ -526,11 +530,11 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
     tic("Full Model")
     # fit clearing versus no clearing model 
     ForP_H0 <- as.formula(paste0(paste("P", paste(Full_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
-    ResultP <- inla(ForP_H0, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H0, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     
     # fit proportion cleared|clearing model
     ForN_H0 <- as.formula(paste0(paste("Prop", paste(Full_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
-    ResultN <- inla(ForN_H0, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H0, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     
     Current_DIC <- Best_DIC <- ResultP$dic$dic + ResultN$dic$dic
     Best_DIC_ls[1] <- Best_DIC
@@ -554,36 +558,12 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
         ForP_H1 <- as.formula(paste0(paste("P", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
         tic("Current Model")
         cat("Running: ", deparse(ForP_H1), "\n", sep = "")
-        
-        ResultP <- tryCatch({
-          inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-        }, error = function(e){
-          if(inla_retry == TRUE){
-            cat("Error in INLA model fitting. Retrying...\n")
-            Sys.sleep(1)
-            inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-          } else if (inla_retry == FALSE){
-            stop("Error in INLA model fitting. Exiting...\n")
-          }
-        })
-        
+        ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
         
         # fit proportion cleared|clearing model
         ForN_H1 <- as.formula(paste0(paste("Prop", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
         cat(deparse(ForN_H1), "\n", sep = "")
-        
-        ResultN <- tryCatch({
-          inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-        }, error = function(e){
-          if(inla_retry == TRUE){
-            cat("Error in INLA model fitting. Retrying...\n")
-            Sys.sleep(1)
-            inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-          } else if (inla_retry == FALSE){
-            stop("Error in INLA model fitting. Exiting...\n")
-          }
-        })
-        
+        ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
         toc(log = TRUE) # Current Model
         cat("\n", sep = "")
         
@@ -592,7 +572,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
         Current_dDIC <- Best_DIC - Current_DIC
         
         # Update the best DIC if the DIC of the current model is better
-        if(Current < Best_DIC){
+        if(Current_DIC < Best_DIC){
           Best_DIC <- Current_DIC
           Best_dDIC <- Current_dDIC
           Worst_explV <- Sel_explV_ls[x]
@@ -614,7 +594,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
         break
       }
       detach("package:INLA", unload = TRUE)
-      invisibly(gc())
+      invisible(gc())
       Sys.sleep(1)
       suppressMessages(library(INLA))
     }
@@ -636,11 +616,11 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
     tic("Null Model")
     # fit clearing versus no clearing model 
     ForP_H0 <- as.formula(paste0(paste("P", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
-    ResultP <- inla(ForP_H0, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H0, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     
     # fit proportion cleared|clearing model
     ForN_H0 <- as.formula(paste0(paste("Prop", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
-    ResultN <- inla(ForN_H0, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H0, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     
     Current_DIC <- Best_DIC <- ResultP$dic$dic + ResultN$dic$dic
     Best_DIC_ls[1] <- Best_DIC
@@ -662,36 +642,13 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
         ForP_H1 <- as.formula(paste0(paste("P", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
         tic("Current Model")
         cat("Running: ", deparse(ForP_H1), "\n", sep = "")
-        ResultP <- inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-        
-        ResultP <- tryCatch({
-          inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-        }, error = function(e){
-          if(inla_retry == TRUE){
-            cat("Error in INLA model fitting. Retrying...\n")
-            Sys.sleep(1)
-            inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-          } else if (inla_retry == FALSE){
-            stop("Error in INLA model fitting. Exiting...\n")
-          }
-        })
+        ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
         
         # fit proportion cleared|clearing model
         ForN_H1 <- as.formula(paste0(paste("Prop", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
         cat(deparse(ForN_H1), "\n", sep = "")
         
-        ResultN <- tryCatch({
-          inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-        }, error = function(e){
-          if(inla_retry == TRUE){
-            cat("Error in INLA model fitting. Retrying...\n")
-            Sys.sleep(1)
-            inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-          } else if (inla_retry == FALSE){
-            stop("Error in INLA model fitting. Exiting...\n")
-          }
-        })
-        
+        ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
         toc(log = TRUE) # current model
         
         # Calculate DIC for the current model and compare it with the best model
@@ -718,7 +675,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
       cat("Explanatory variable not tested yet: ", left_explV_ls, "\n\n", sep = "")
       
       detach("package:INLA", unload = TRUE)
-      invisibly(gc())
+      invisible(gc())
       Sys.sleep(1)
       suppressMessages(library(INLA))
     }
@@ -748,14 +705,15 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs, RespData = 
   # fit clearing versus no clearing model 
   ForP_H1 <- as.formula(paste0(paste("P", paste(Sel_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
   cat("Running Best model: ", deparse(ForP_H1), "\n")
-  ResultP <- inla(ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+  ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
   
   # fit proportion cleared|clearing model
   ForN_H1 <- as.formula(paste0(paste("Prop", paste(Sel_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
   cat(deparse(ForN_H1), "\n")
-  ResultN <- inla(ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-  
+  ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H1, data = DataN, family = "beta", control.inla = list(control.vb = list(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
   toc(log = TRUE) # Total Time
   # return models
   return(list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly, Best_DIC_ls = Best_DIC_ls))
 }
+
+
