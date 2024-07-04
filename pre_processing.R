@@ -47,6 +47,7 @@ All_SUs[All_SUs$Shape_Area < 0,]
 
 # save processes spatial units
 saveRDS(SUs, file = "output/spatial_units/sus.rds")
+qsave(SUs, file = "output/spatial_units/sus.qs", preset = "fast")
 
 # load SA1s spatial layer
 # note that these are the SA1s for the whole study area, not for each KMR
@@ -65,6 +66,7 @@ SA1s <- list(CC = SA1s_All[which(!is.na(left_join(SA1s_All, as_tibble(unique(SUs
 
 # save processed SA1s
 saveRDS(SA1s, file = "output/spatial_units/sa1s.rds")
+qsave(SA1s, file = "output/spatial_units/sa1s.qs", preset = "fast")
 
 # get woody cover in 2011
 Woody <- terra::rast("input/woody_cover/woody_nsw.tif") %>% round()
@@ -96,7 +98,7 @@ ZStats_Woody <- map(.x = ZStats_Woody, .f = round)
 
 # save data
 saveRDS(ZStats_Woody, file = "output/data/ZStats_Woody.rds")
-
+qsave(ZStats_Woody, file = "output/data/ZStats_Woody.qs", preset = "fast")
 
 rm(list = setdiff(ls(all.names = TRUE), "SUs"))
 gc()
@@ -195,7 +197,7 @@ rm(list = c(CropRastCovsC, ZStats_CovsC))
 # tmpFiles(current=TRUE, orphan=TRUE, old=TRUE, remove=TRUE)
 gc()
 
-SUs <- readRDS("output/spatial_units/sus.rds")
+SUs <- qread("output/spatial_units/sus.qs")
 
 # Load proposed covariates based on workshops from lookup xlsx
 CovLookup <- readxl::read_xlsx("Input/covariates/covariate_description.xlsx", sheet = "AllLyr")
@@ -210,7 +212,7 @@ for(i in 1:nrow(CovLookup)){
 }    
 
 # create raster stack of discrete covariates
-StackCovsD <- terra::rast(list(PolPref , LandTen, NSW_forten18_ForTen, NSW_forten18_ForType, NatVegReg , PlanZone, LandUse, drought , Fire   ))
+StackCovsD <- terra::rast(list(PolPref , LandTen, NSW_forten18_ForTen, NSW_forten18_ForType, NatVegReg = NatVegReg , PlanZone, LandUse, drought , Fire   ))
 
 # save raster stack
 saveRDS(StackCovsD, file = "output/raster_stacks/disc_covs.rds")
@@ -243,6 +245,8 @@ gc()
 # Combine SUs and Woody
 ZStats_Woody <- readRDS("output/data/ZStats_Woody.rds")
 lapply(ZStats_Woody, summary)
+ZStats_Woody_all <- do.call(rbind, ZStats_Woody)
+summary(ZStats_Woody_all)
 
 ZStats_Woody_sf <- ZStats_Woody
 for (i in names(ZStats_Woody_sf)) {
@@ -284,7 +288,7 @@ ZStats_CovsD <- readRDS("output/data/ZStats_CovsD.rds")
 lapply(ZStats_CovsD, summary)
 
 ZStats_CovsD_all <- do.call(rbind, ZStats_CovsD)
-summary(ZStats_CovsD_all$PlanZone)
+summary(ZStats_CovsD_all)
 
 ZStats_CovsD_sf <- ZStats_CovsD
 for (i in names(ZStats_CovsD_sf)) {
