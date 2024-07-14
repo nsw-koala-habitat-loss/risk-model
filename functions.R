@@ -210,7 +210,7 @@ fit_model2 <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody,
   CP <- Covs[which(NT > 0), ] # only fit to data for properties with woody vegetation
   CP <- CP %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
   DataP <- bind_cols(ResponseP, CP)
-  ExplV <- if(Explanatory == "All") {paste(names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse=" + ")} else {paste(Explanatory, , collapse=" + ")}
+  ExplV <- if(Explanatory == "All") {paste(names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse=" + ")} else {paste(Explanatory)}
   
   # get adjacency matrix for SA1s containing properties with forest cover
   SA1IDs <- CP %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
@@ -382,6 +382,12 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
   # OutputDir = directory to save model output (optional)
   
   tic("Total Time")
+  
+  # Filter input data to KMR only (save memory)
+  SpatUnits <- SpatUnits[[KMR]] %>%   list() %>% setNames(KMR)
+  RespData <- RespData[[KMR]] %>% list() %>% setNames(KMR)
+  CovsCD <- CovsCD[[KMR]] %>% list() %>% setNames(KMR)
+  SA1sPoly <- SA1sPoly[[KMR]] %>% list() %>% setNames(KMR)
   
   # get attribute table of spatial units and join covariates
   Covs <- SpatUnits[[KMR]] %>% st_drop_geometry() %>% as_tibble() %>% dplyr::select(-KMR, -Shape_Length, -Shape_Area) %>% bind_cols(CovsCD[[KMR]]) %>% mutate(SUID = 1:n())
@@ -705,7 +711,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
         Current_DIC <- ResultP$dic$dic + ResultN$dic$dic
         cat("DIC = ", format(round(Current_DIC, 2)), "   ExplV: ", explV, "\n", sep = "")
         DIC_ls[length(DIC_ls)+1] <- Current_DIC 
-        dDIC_ls[length(dDIC_ls)+1] <- Current_DIC + (2*length(explV))
+        dDIC_ls[length(dDIC_ls)+1] <- Current_DIC + 2*length(unlist(strsplit(explV, "\\+")))
         names(DIC_ls)[length(DIC_ls)] <- names(dDIC_ls)[length(dDIC_ls)] <- paste(explV) 
         
         # Update the best DIC if the DIC of the current model is better
@@ -730,8 +736,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
     Best_explvs <- names(dDIC_ls)[which.min(dDIC_ls)]
     if(Best_explvs != "H0"){
       Sel_explV_ls <- unlist(strsplit(Best_explvs, " \\+ "))
-    }
-    else{
+    }else{
       Sel_explV_ls <- 1
       warning("Null model selected!")
       }
@@ -829,8 +834,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
     
     if(Best_explvs != "H0"){
       Sel_explV_ls <- unlist(strsplit(Best_explvs, " \\+ "))
-    }
-    else{
+    }else{
       Sel_explV_ls <- 1
       warning("Null model selected!")
     }
@@ -852,10 +856,13 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
   ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H1, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
   toc(log = TRUE) # Total Time
   
+  # filter CovCD to only include selected explanatory variables (For Predict function)
+  CovsCD <- CovsCD[[KMR]] %>% dplyr::select(all_of(Sel_explV_ls)) %>%  list() %>% setNames(KMR)
+  
   # return models
   if(!is.null(OutputDir)){
     Model <- list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly, DIC_ls = DIC_ls)
-    output_FPath <- file.path(OutputDir, paste0("SelModel_", KMR, "_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, Selection, ".qs"))
+    output_FPath <- file.path(OutputDir, paste0("SelModel_", KMR, "_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, Direction, ".qs"))
     qsave(Model, file = output_FPath)
   }
   return(list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly, DIC_ls = DIC_ls))
