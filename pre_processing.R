@@ -115,7 +115,7 @@ SUs_Woody <- do.call(rbind, SUs_Woody)
 saveRDS(SUs_Woody, file = "output/data/SUs_Woody.rds")
 
 # Preprocess covariates ----
-SUs <- readRDS("output/spatial_units/sus.rds")
+SUs <- qread("output/spatial_units/sus.qs")
 
 # # combined drought indicator
 # Drought <- terra::rast("input/covariates/drought.tif")
@@ -170,12 +170,13 @@ for(i in 1:nrow(CovLookup)){
 # create raster stack of continuous covariates
 StackCovsC <- terra::rast(list(PopDen16, PopGro16, SocioEcon16_PC, DistRoad, DistCity, prop_value, AgProf, TSoilPC, elev, slope, prec, temp , EcolCond))
 names(StackCovsC)[c(2, 10, 11, 15, 17, 18)] <- c("PopGro", "PropVal", "AgProf", "Elev", "Precip", "Temp")
-
+plot(CropRastTSoilPC$CC)
 # save raster stack
 saveRDS(StackCovsC, file = "output/raster_stacks/cont_covs.rds")
 
 # crop continuous covariate rasters by spatial units for each KMR
 CropRastCovsC <- map(.x = SUs, .f = get_crop, Raster = StackCovsC)
+CropRastTSoilPC <- map(.x = SUs, .f = get_crop, Raster = TSoilPC)
 
 rm(list = setdiff(ls(all.names = TRUE), c(ls(all.names = TRUE)[sapply(ls(all.names = TRUE), function(x) is.function(get(x)))], "SUs", "CropRastCovsC")))
 # tmpFiles(current=TRUE, orphan=TRUE, old=TRUE, remove=TRUE)
@@ -183,6 +184,15 @@ gc()
 
 # get continuous covariate values
 ZStats_CovsC <- map2(.x = SUs, .y = CropRastCovsC, .f = get_zonal2, Stat = "mean")
+ZStats_CovsC_TSOIL <- exact_extract(CropRastTSoilPC$CC, SUs$CC, "mean", max_cells_in_memory = 3.5e+08 )
+
+ZStats_CovsC_TSOIL <- as_tibble(ZStats_CovsC_TSOIL)
+sapply(ZStats_CovsC_TSOIL, function(x) sum(is.na(x)))
+ZStats_CovsC_TSOIL_SUs_NA <- bind_cols(SUs$CC, ZStats_CovsC_TSOIL) %>% 
+  filter(is.na(mean.Soil_PC1) == TRUE)
+st_write(ZStats_CovsC_TSOIL_SUs_NA, "output/data/ZStats_CovsC_TSOIL_SUs_NA.shp", append = FALSE)
+
+
 
 # remove "mean" label from continuous covariates names
 for (i in names(ZStats_CovsC)) {
@@ -231,6 +241,74 @@ for (i in names(ZStats_CovsD)) {
 
 # save data
 saveRDS(ZStats_CovsD, file = "output/data/ZStats_CovsD.rds")
+
+#'#############################################
+## Extract single Covariate ----
+#'#############################################
+
+### ForTen
+ForTen <- rast("input/covariates/NSW_forten18_ForTen.tif")
+CropRast_Forten <- map(.x = SUs, .f = get_crop, Raster = ForTen)
+ZStats_Forten <- map2(.x = SUs, .y = CropRast_Forten, .f = get_zonal2, Stat = "mode")
+for (i in names(ZStats_Forten)) {
+  names(ZStats_Forten[[i]]) <- "ForTen"
+  ZStats_Forten[[i]] <- ZStats_Forten[[i]] %>% mutate(ForTen = as.factor(ForTen))
+}
+
+ZStats_CovsD <- readRDS("output/data/ZStats_CovsD.rds")
+ZStats_CovsD <- ZStats_CovsD %>% map(~select(., -ForTen)) %>% map2(ZStats_Forten, ~bind_cols(.x, .y))
+saveRDS(ZStats_CovsD, file = "output/data/ZStats_CovsD.rds")
+
+#'#####
+### PlanZone----
+SUs <- qread("output/spatial_units/sus.qs")
+PlanZone <- rast("input/covariates/PlanZone.tif")
+CropRast_PlanZone <- map(.x = SUs, .f = get_crop, Raster = PlanZone)
+ZStats_PlanZone <- map2(.x = SUs, .y = CropRast_PlanZone, .f = get_zonal2, Stat = "mode")
+for (i in names(ZStats_PlanZone)) {
+  names(ZStats_PlanZone[[i]]) <- "PlanZone"
+  ZStats_PlanZone[[i]] <- ZStats_PlanZone[[i]] %>% mutate(PlanZone = as.factor(PlanZone))
+}
+
+ZStats_CovsD <- readRDS("output/data/ZStats_CovsD.rds")
+ZStats_CovsD <- ZStats_CovsD %>% map(~dplyr::select(., -PlanZone)) %>% map2(ZStats_PlanZone, ~bind_cols(.x, .y))
+saveRDS(ZStats_CovsD, file = "output/data/ZStats_CovsD.rds")
+
+#'#####
+SUs <- qread("output/spatial_units/sus.qs")
+Remoteness <- rast("input/covariates/remote2016.tif")
+
+CropRast_Remote <- map(.x = SUs, .f = get_crop, Raster = Remoteness)
+ZStats_Remote <- map2(.x = SUs, .y = CropRast_Remote, .f = get_zonal2, Stat = "mode")
+for (i in names(ZStats_Remote)) {
+  names(ZStats_Remote[[i]]) <- "Remote"
+  ZStats_Remote[[i]] <- ZStats_Remote[[i]] %>% mutate(Remote = as.factor(Remote))
+}
+
+ZStats_CovsD <- readRDS("output/data/ZStats_CovsD.rds")
+ZStats_CovsD <- ZStats_CovsD %>% map2(ZStats_Remote, ~bind_cols(.x, .y))
+saveRDS(ZStats_CovsD, file = "output/data/ZStats_CovsD.rds")
+
+#'####
+### TenType & PLanZone----
+SUs <- qread("output/spatial_units/sus.qs")
+PlanZone <- rast("input/covariates/PlanZone.tif")
+TenType <- rast("input/covariates/NSW_forten18_TenType.tif")
+plot(PlanZone)
+plot(TenType)
+RastStack <- terra::rast(list(PlanZone, TenType))
+CropRast <- map(.x = SUs, .f = get_crop, Raster = RastStack)
+ZStats <- map2(.x = SUs, .y = CropRast, .f = get_zonal2, Stat = "mode")
+for (i in names(ZStats)) {
+  names(ZStats[[i]]) <- c("PlanZone", "TenType")
+  ZStats[[i]] <- ZStats[[i]] %>% mutate_all(~as.factor(.))
+}
+map(ZStats, ~summary(.))
+ZStats_CovsD <- readRDS("output/data/ZStats_CovsD.rds")
+ZStats_CovsD <- ZStats_CovsD %>% map(~select(., -PlanZone)) %>% map2(ZStats, ~bind_cols(.x, .y))
+saveRDS(ZStats_CovsD, file = "output/data/ZStats_CovsD.rds")
+
+#'####################################################
 
 # Clearing stroage and memory space before other processess if necessary
 rm(ZStats_CovsD, CropRastCovsD, StackCovsD)
@@ -300,3 +378,80 @@ ZStats_CovsD_sf <- do.call(rbind, ZStats_CovsD_sf)
 summary(ZStats_CovsD_sf)
 
 # st_write(ZStats_CovsD_sf, "input/ZStats_CovsD_sf.shp", append = FALSE)
+
+# Check for missing values under different clearing types ----
+ZStats_Woody <- qread("output/data/ZStats_Woody.qs")
+ZStats_CovsD <- readRDS("output/data/ZStats_CovsD.rds")
+ZStats_CovsC <- readRDS("output/data/ZStats_CovsC.rds")
+SUs <- qread("output/spatial_units/sus.qs")
+
+names(ZStats_CovsD)
+
+SUs_ZStats <- SUs
+for(i in names(SUs)){
+  SUs_ZStats[[i]] <- bind_cols(SUs[[i]], ZStats_Woody[[i]], ZStats_CovsD[[i]], ZStats_CovsC[[i]])
+}
+
+## Agriculture ----
+SUs_ZStats_Agri <- SUs_ZStats %>% 
+  # map(~filter(., sum.aloss > 0)) %>% 
+  map(~st_drop_geometry(.)) %>% 
+  map(~base::subset(., select = c("KMR", "SA1", "sum.aloss", "sum.woody", "PopDen", "ScEc_PC1", "ScEc_PC2", "ScEc_PC3", "ScEc_PC4", "ScEc_PC5", "DistRoad", "DistCity", "PropVal", "AgProf", "Soil_PC1", "Soil_PC2", "Soil_PC3", "slope", "Precip", "Temp", "EcolCond", "Area", "LandTen", "NatVegReg", "LandUse", "Fire")))
+# map(SUs_ZStats_Agri, ~summary(.))
+NA_Val <- t(map_dfr(SUs_ZStats_Agri, ~map(., ~sum(is.na(.)))))
+NA_Pct <- t(map_dfr(SUs_ZStats_Agri, 
+        ~map(., 
+             ~round((sum(is.na(.)))/length(.), 3))))
+colnames(NA_Val) <- names(SUs_ZStats_Agri)
+colnames(NA_Pct) <- names(SUs_ZStats_Agri)
+NA_Val
+NA_Pct
+
+## Infrastructure ----
+SUs_ZStats_Infr <- SUs_ZStats %>% 
+  map(~st_drop_geometry(.)) %>% 
+  map(~base::subset(., select = c("KMR", "SA1", "sum.iloss", "sum.woody", "PopDen", "PopGro", "ScEc_PC1", "ScEc_PC2", "ScEc_PC3", "ScEc_PC4", "ScEc_PC5", "DistRoad", "DistCity", "PropVal", "AgProf", "Soil_PC1", "Soil_PC2", "Soil_PC3", "slope", "Precip", "Temp", "EcolCond", "Area", "PolPref", "LandTen", "PlanZone", "LandUse", "Fire")))
+# map(SUs_ZStats_Infr, ~summary(.))
+NA_Val <-t(map_dfr(SUs_ZStats_Infr, ~map(., ~sum(is.na(.)))))
+NA_Pct <- t(map_dfr(SUs_ZStats_Infr, 
+        ~map(., 
+             ~round((sum(is.na(.)))/length(.), 3))))
+colnames(NA_Val) <- names(SUs_ZStats_Agri)
+colnames(NA_Pct) <- names(SUs_ZStats_Agri)
+NA_Val
+NA_Pct
+
+## Forest ----
+SUs_ZStats_Forest <- SUs_ZStats %>% 
+  map(~st_drop_geometry(.)) %>% 
+  map(~base::subset(., select = c("KMR", "SA1", "sum.floss", "sum.woody", "PopDen", "ScEc_PC1", "ScEc_PC2", "ScEc_PC3", "ScEc_PC4", "ScEc_PC5", "DistRoad", "DistCity", "PropVal", "AgProf", "Soil_PC1", "Soil_PC2", "Soil_PC3", "slope", "Precip", "Temp", "EcolCond", "Area", "PolPref", "LandTen", "ForTen", "NatVegReg", "LandUse", "Fire"))) %>% 
+  map(~filter(., NatVegReg != "0", sum.woody >0, !(ForTen %in% c("2","3"))))
+map(SUs_ZStats_Forest, ~summary(.))
+SUs_ZStats_Forest_all <- do.call(rbind, SUs_ZStats_Forest)
+SUs_ZStats_CovD_Forest_all <- SUs_ZStats_Forest_all %>% 
+  dplyr::select("PolPref", "LandTen", "ForTen", "NatVegReg", "LandUse", "Fire") %>% 
+  mutate(ForTen = if_else(is.na(ForTen), "0", ForTen))
+cramers_v_matrix <- matrix(NA, nrow = ncol(SUs_ZStats_CovD_Forest_all), ncol = ncol(SUs_ZStats_CovD_Forest_all), 
+                           dimnames = list(names(SUs_ZStats_CovD_Forest_all), names(SUs_ZStats_CovD_Forest_all)))
+
+for (i in 1:ncol(SUs_ZStats_CovD_Forest_all)) {
+  for(j in 1:ncol(SUs_ZStats_CovD_Forest_all)) {
+    cramersv_val <- confintr::cramersv(as.data.frame(SUs_ZStats_CovD_Forest_all[c(i,j)]))
+    cramers_v_matrix[i,j] <- cramersv_val
+  }
+}
+
+Corr_Categ_all_plot <- GGally::ggcorr(data = NULL, geom= "blank", cor_matrix = cramers_v_matrix, label = TRUE, hjust = 1, layout.exp = 2)+ 
+  geom_point(size = 10, aes(color = coefficient > 0, alpha = abs(coefficient)> 0.5))+ 
+  scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) + 
+  guides(color = FALSE, alpha = FALSE)
+
+
+NA_Val <-t(map_dfr(SUs_ZStats_Forest, ~map(., ~sum(is.na(.)))))
+NA_Pct <- t(map_dfr(SUs_ZStats_Forest, 
+        ~map(., 
+             ~round((sum(is.na(.)))/length(.), 3))))
+colnames(NA_Val) <- names(SUs_ZStats_Agri)
+colnames(NA_Pct) <- names(SUs_ZStats_Agri)
+NA_Val
+NA_Pct
