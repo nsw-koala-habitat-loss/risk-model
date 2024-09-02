@@ -1,5 +1,10 @@
 # THIS CODE READS IN THE REQUIRED DATA AND ORGANISES THE DATA FOR MODEL FITTING
 
+# Clear memory space and hard drive space before preprocessing
+rm(list = ls(all.names = TRUE)) #will clear all objects includes hidden objects.
+gc() #free up memrory and report the memory usage.
+# tmpFiles(current=TRUE, orphan=TRUE, old=TRUE, remove=FALSE)
+
 # load libraries
 library(sf)
 library(sp)
@@ -15,16 +20,6 @@ library(qs)
 source("functions.R")
 
 # load spatial property units for each KMR
-# SUs <- list(CC = st_read("input/spatial_units/props_kmrs.gdb", layer = "Central_Coast"),
-#             CST = st_read("input/spatial_units/props_kmrs.gdb", layer = "Central_Southern_Tablelands"),
-#             DRP = st_read("input/spatial_units/props_kmrs.gdb", layer = "Darling_Riverine_Plains"),
-#             FW = st_read("input/spatial_units/props_kmrs.gdb", layer = "Far_West"),
-#             NC = st_read("input/spatial_units/props_kmrs.gdb", layer = "North_Coast"),
-#             NT = st_read("input/spatial_units/props_kmrs.gdb", layer = "Northern_Tablelands"),
-#             NS = st_read("input/spatial_units/props_kmrs.gdb", layer = "Northwest_Slopes"),
-#             R = st_read("input/spatial_units/props_kmrs.gdb", layer = "Riverina"),
-#             SC = st_read("input/spatial_units/props_kmrs.gdb", layer = "South_Coast"))
-
 SUs <- list(CC = st_read("input/spatial_units/lots_kmrs.gdb", layer = "Central_Coast"),
             CST = st_read("input/spatial_units/lots_kmrs.gdb", layer = "Central_Southern_Tablelands"),
             DRP = st_read("input/spatial_units/lots_kmrs.gdb", layer = "Darling_Riverine_Plains"),
@@ -42,8 +37,7 @@ for (i in names(SUs)) {
 }
 
 # Check for Shape_Area < 0 
-All_SUs <- do.call(rbind, SUs)
-All_SUs[All_SUs$Shape_Area < 0,]
+do.call(rbind, SUs) %>% filter(Shape_Area < 0)
 
 # save processes spatial units
 saveRDS(SUs, file = "output/spatial_units/sus.rds")
@@ -64,6 +58,9 @@ SA1s <- list(CC = SA1s_All[which(!is.na(left_join(SA1s_All, as_tibble(unique(SUs
              R = SA1s_All[which(!is.na(left_join(SA1s_All, as_tibble(unique(SUs$R$SA1)), join_by(SA1_CODE21 == value), keep = TRUE)$value)),],
              SC = SA1s_All[which(!is.na(left_join(SA1s_All, as_tibble(unique(SUs$SC$SA1)), join_by(SA1_CODE21 == value), keep = TRUE)$value)),])
 
+# Check for any NA values in SA1s
+do.call(rbind, SA1s) %>% filter(if_all(everything(), is.na))
+
 # save processed SA1s
 saveRDS(SA1s, file = "output/spatial_units/sa1s.rds")
 qsave(SA1s, file = "output/spatial_units/sa1s.qs", preset = "fast")
@@ -81,8 +78,11 @@ Ag_Loss <- WLStack %>% classify(cbind(c(1, 2, 3, 4), c(0, 1, 0, 0))) %>% max(na.
 In_Loss <- WLStack %>% classify(cbind(c(1, 2, 3, 4), c(0, 0, 1, 0))) %>% max(na.rm = TRUE) %>% crop(Woody)
 Fo_Loss <- WLStack %>% classify(cbind(c(1, 2, 3, 4), c(0, 0, 0, 1))) %>% max(na.rm = TRUE) %>% crop(Woody)
 
+# read in Koala habitat suitability continuous covariate for extraction together with Woody cover stack
+Khab <- rast("input/covariates/KoalaHabitatSuitability.tif")
+
 # create raster stack of woody extent and loss
-Stack <- terra::rast(list(aloss = Ag_Loss, iloss = In_Loss, floss = Fo_Loss, woody = Woody))
+Stack <- terra::rast(list(aloss = Ag_Loss, iloss = In_Loss, floss = Fo_Loss, woody = Woody, Khab = Khab))
 
 # save raster stack
 saveRDS(Stack, file = "output/raster_stacks/woodyextloss.rds")
@@ -91,7 +91,7 @@ saveRDS(Stack, file = "output/raster_stacks/woodyextloss.rds")
 CropRast <- map(.x = SUs, .f = get_crop, Raster = Stack)
 
 # calculate the number of cells of woody extent and loss in each spatial unit for each KMR
-ZStats_Woody <- map2(.x = SUs, .y = CropRast, .f = get_zonal, Stat = "sum")
+ZStats_Woody <- map2(.x = SUs, .y = CropRast, .f = get_zonal2, Stat = "sum")
 
 # round to the nearest integer
 ZStats_Woody <- map(.x = ZStats_Woody, .f = round)
@@ -99,6 +99,10 @@ ZStats_Woody <- map(.x = ZStats_Woody, .f = round)
 # save data
 saveRDS(ZStats_Woody, file = "output/data/ZStats_Woody.rds")
 qsave(ZStats_Woody, file = "output/data/ZStats_Woody.qs", preset = "fast")
+
+ZStats_Woody_all <- do.call(rbind, ZStats_Woody)
+ZStats_Woody_all %>% filter(sum.woody < sum.Khab)
+
 
 rm(list = setdiff(ls(all.names = TRUE), "SUs"))
 gc()
@@ -115,45 +119,9 @@ SUs_Woody <- do.call(rbind, SUs_Woody)
 saveRDS(SUs_Woody, file = "output/data/SUs_Woody.rds")
 
 # Preprocess covariates ----
+
+## Continuous covariate ---- 
 SUs <- qread("output/spatial_units/sus.qs")
-
-# # combined drought indicator
-# Drought <- terra::rast("input/covariates/drought.tif")
-# # elevation
-# Elev <- terra::rast("input/covariates/elev.tif")
-# # fire history (2011-2019)
-# Fire <- terra::rast("input/covariates/fire.tif")
-# # forest code
-# ForCode <- terra::rast("input/covariates/forest_code.tif")
-# # forest tenure
-# ForTen <- terra::rast("input/covariates/forest_tenure.tif")
-# # forest tenure type
-# ForTenType <- terra::rast("input/covariates/forest_tenure_type.tif")
-# # 2016 median household income weekly
-# Income <- terra::rast("input/covariates/income.tif")
-# # land use (NSW landuse 2013)
-# LandUse <- terra::rast("input/covariates/landuse.tif")
-# # population density
-# PopDen <- terra::rast("input/covariates/pop_den.tif")
-# # precipitation
-# Precip <- terra::rast("input/covariates/prec.tif")
-# # remoteness structure (ABS)
-# Remote <- terra::rast("input/covariates/remoteness.tif")
-# # slope
-# Slope <- terra::rast("input/covariates/slope.tif")
-# # soil fertility
-# SoilFert <- terra::rast("input/covariates/soil_fert.tif")
-# # soil nitrogen
-# SoilNit <- terra::rast("input/covariates/soil_nitrogen.tif")
-# # soil type
-# SoilType <- terra::rast("input/covariates/soil_type.tif")
-# # temperature
-# Temp <- terra::rast("input/covariates/temp.tif")
-# # # Property size
-# PropSize <- terra::rast("input/covariates/prop_size.tif")
-# # # Property value
-# PropVal <- terra::rast("input/covariates/prop_value.tif")
-
 
 # Load proposed covariates based on workshops from lookup xlsx
 CovLookup <- readxl::read_xlsx("Input/covariates/covariate_description.xlsx", sheet = "AllLyr")
@@ -165,32 +133,34 @@ for(i in 1:nrow(CovLookup)){
     print(paste0("Load ... ", CovLookup$Type[i] ," ... ", CovLookup$`Covariate Code`[i], " = ",  CovLookup$`Covariate Description`[i]))
     assign(CovLookup$`Covariate Code`[i], terra::rast(paste0("input/covariates/", CovLookup$`Covariate Code`[i], ".tif")))
   }
-}    
+}
 
 # create raster stack of continuous covariates
 StackCovsC <- terra::rast(list(PopDen16, PopGro16, SocioEcon16_PC, DistRoad, DistCity, prop_value, AgProf, TSoilPC, elev, slope, prec, temp , EcolCond))
 names(StackCovsC)[c(2, 10, 11, 15, 17, 18)] <- c("PopGro", "PropVal", "AgProf", "Elev", "Precip", "Temp")
-plot(CropRastTSoilPC$CC)
+
 # save raster stack
 saveRDS(StackCovsC, file = "output/raster_stacks/cont_covs.rds")
 
 # crop continuous covariate rasters by spatial units for each KMR
 CropRastCovsC <- map(.x = SUs, .f = get_crop, Raster = StackCovsC)
-CropRastTSoilPC <- map(.x = SUs, .f = get_crop, Raster = TSoilPC)
 
+# Clear memory space and hard drive space before extracting continuous covariates
 rm(list = setdiff(ls(all.names = TRUE), c(ls(all.names = TRUE)[sapply(ls(all.names = TRUE), function(x) is.function(get(x)))], "SUs", "CropRastCovsC")))
-# tmpFiles(current=TRUE, orphan=TRUE, old=TRUE, remove=TRUE)
+# tmpFiles(current=TRUE, orphan=TRUE, old=TRUE, remove=FALSE)
 gc()
 
 # get continuous covariate values
 ZStats_CovsC <- map2(.x = SUs, .y = CropRastCovsC, .f = get_zonal2, Stat = "mean")
-ZStats_CovsC_TSOIL <- exact_extract(CropRastTSoilPC$CC, SUs$CC, "mean", max_cells_in_memory = 3.5e+08 )
 
-ZStats_CovsC_TSOIL <- as_tibble(ZStats_CovsC_TSOIL)
-sapply(ZStats_CovsC_TSOIL, function(x) sum(is.na(x)))
-ZStats_CovsC_TSOIL_SUs_NA <- bind_cols(SUs$CC, ZStats_CovsC_TSOIL) %>% 
-  filter(is.na(mean.Soil_PC1) == TRUE)
-st_write(ZStats_CovsC_TSOIL_SUs_NA, "output/data/ZStats_CovsC_TSOIL_SUs_NA.shp", append = FALSE)
+
+# ZStats_CovsC_TSOIL <- exact_extract(CropRastTSoilPC$CC, SUs$CC, "mean", max_cells_in_memory = 3.5e+08 )
+# 
+# ZStats_CovsC_TSOIL <- as_tibble(ZStats_CovsC_TSOIL)
+# sapply(ZStats_CovsC_TSOIL, function(x) sum(is.na(x)))
+# ZStats_CovsC_TSOIL_SUs_NA <- bind_cols(SUs$CC, ZStats_CovsC_TSOIL) %>% 
+#   filter(is.na(mean.Soil_PC1) == TRUE)
+# st_write(ZStats_CovsC_TSOIL_SUs_NA, "output/data/ZStats_CovsC_TSOIL_SUs_NA.shp", append = FALSE)
 
 
 
@@ -201,14 +171,17 @@ for (i in names(ZStats_CovsC)) {
 
 # save data
 saveRDS(ZStats_CovsC, file = "output/data/ZStats_CovsC.rds")
+qsave(ZStats_CovsC, file = "output/data/ZStats_CovsC.qs", preset = "fast")
 
 # Clearing stroage and memory space before processing Discrete variables.
-rm(list = c(CropRastCovsC, ZStats_CovsC))
+rm(list = ls(all.names = TRUE)) #will clear all objects includes hidden objects.
 # tmpFiles(current=TRUE, orphan=TRUE, old=TRUE, remove=TRUE)
 gc()
 
-SUs <- qread("output/spatial_units/sus.qs")
-
+## Discrete covariate ---- 
+# load functions
+source("functions.R")
+SUs <- readRDS("output/spatial_units/sus.rds")
 # Load proposed covariates based on workshops from lookup xlsx
 CovLookup <- readxl::read_xlsx("Input/covariates/covariate_description.xlsx", sheet = "AllLyr")
 
@@ -221,9 +194,12 @@ for(i in 1:nrow(CovLookup)){
   }
 }    
 
-# create raster stack of discrete covariates
-StackCovsD <- terra::rast(list(PolPref , LandTen, NSW_forten18_ForTen, NSW_forten18_ForType, NatVegReg = NatVegReg , PlanZone, LandUse, drought , Fire   ))
+# Manually read in  raster discrete covariates (Use this method to read in layers if the for-loop does not work or to read in additional layers)
+Remoteness <- rast("input/covariates/remote2016.tif")
 
+# create raster stack of discrete covariates
+StackCovsD <- terra::rast(list(PolPref , LandTen, NSW_forten18_ForTen, NSW_forten18_TenType, NSW_forten18_ForType, NatVegReg = NatVegReg , PlanZone, LandUse, drought , Fire  , Remoteness ))
+names(StackCovsD)
 # save raster stack
 saveRDS(StackCovsD, file = "output/raster_stacks/disc_covs.rds")
 
@@ -231,7 +207,7 @@ saveRDS(StackCovsD, file = "output/raster_stacks/disc_covs.rds")
 CropRastCovsD <- map(.x = SUs, .f = get_crop, Raster = StackCovsD)
 
 # get discrete covariate values
-ZStats_CovsD <- map2(.x = SUs, .y = CropRastCovsD, .f = get_zonal2, Stat = "mode") # note here could use Stat = "frac" to get the fraction of each discrete type in each property
+ZStats_CovsD <- map2(.x = SUs, .y = CropRastCovsD, .f = get_zonal, Stat = "mode") # note here could use Stat = "frac" to get the fraction of each discrete type in each property
 
 # remove "mode" label from discrete covariates names and covert to factors
 for (i in names(ZStats_CovsD)) {
@@ -241,12 +217,16 @@ for (i in names(ZStats_CovsD)) {
 
 # save data
 saveRDS(ZStats_CovsD, file = "output/data/ZStats_CovsD.rds")
+qsave(ZStats_CovsD, file = "output/data/ZStats_CovsD.qs", preset = "fast")
+
+## Codes no longer relevant but keeping it for now
+## Will remove before sharing the code
 
 #'#############################################
 ## Extract single Covariate ----
 #'#############################################
 
-### ForTen
+### ForTen ----
 ForTen <- rast("input/covariates/NSW_forten18_ForTen.tif")
 CropRast_Forten <- map(.x = SUs, .f = get_crop, Raster = ForTen)
 ZStats_Forten <- map2(.x = SUs, .y = CropRast_Forten, .f = get_zonal2, Stat = "mode")
@@ -275,6 +255,7 @@ ZStats_CovsD <- ZStats_CovsD %>% map(~dplyr::select(., -PlanZone)) %>% map2(ZSta
 saveRDS(ZStats_CovsD, file = "output/data/ZStats_CovsD.rds")
 
 #'#####
+### Remoteness----
 SUs <- qread("output/spatial_units/sus.qs")
 Remoteness <- rast("input/covariates/remote2016.tif")
 
@@ -307,6 +288,34 @@ map(ZStats, ~summary(.))
 ZStats_CovsD <- readRDS("output/data/ZStats_CovsD.rds")
 ZStats_CovsD <- ZStats_CovsD %>% map(~select(., -PlanZone)) %>% map2(ZStats, ~bind_cols(.x, .y))
 saveRDS(ZStats_CovsD, file = "output/data/ZStats_CovsD.rds")
+
+#'####
+### Native Vegetation Regulations----
+SUs <- qread("output/spatial_units/sus.qs")
+NVR <- rast("input/covariates/NVR.tif")
+CropRast_NVR <- map(.x = SUs, .f = get_crop, Raster = NVR)
+ZStats_NVR <- map2(.x = SUs, .y = CropRast_NVR, .f = get_zonal2, Stat = "mode")
+for (i in names(ZStats_NVR)) {
+  names(ZStats_NVR[[i]]) <- "NVR"
+  ZStats_NVR[[i]] <- ZStats_NVR[[i]] %>% mutate(NVR = as.factor(NVR))
+}
+ZStats_CovsD <- readRDS("output/data/ZStats_CovsD.rds")
+ZStats_CovsD <- ZStats_CovsD %>% map2(ZStats_NVR, ~bind_cols(.x, .y))
+saveRDS(ZStats_CovsD, file = "output/data/ZStats_CovsD.rds")
+
+#'####
+### Koala habitat suitability----
+SUs <- qread("output/spatial_units/sus.qs")
+ZStats_Woody <- qread("output/data/ZStats_Woody.qs")
+Khab <- rast("input/covariates/KoalaHabitatSuitability.tif")
+Woody <- rast("input/woody_cover/woody_nsw.tif")
+
+cropRast_Khab <- map(.x = SUs, .f = get_crop, Raster = Khab)
+ZStats_Khab <- map2(.x = SUs, .y = cropRast_Khab, .f = get_zonal2, Stat = "sum")
+for (i in names(ZStats_Khab)) {
+  names(ZStats_Khab[[i]]) <- "Khab"
+}
+qsave(ZStats_Khab, file = "output/data/ZStats_Khab.qs")
 
 #'####################################################
 
