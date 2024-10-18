@@ -220,7 +220,7 @@ fit_model2 <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody,
   
   # fit clearing versus no clearing model
   formula <- as.formula(paste0(paste("P", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
-  ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+  ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
 
   # proportion cleared|clearing model
   
@@ -240,7 +240,7 @@ fit_model2 <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody,
   
   # fit proportion cleared|clearing model
   formula <- as.formula(paste0(paste("Prop", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
-  ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+  ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
   
   # return models
   if(!is.null(OutputDir)){
@@ -250,6 +250,7 @@ fit_model2 <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody,
   }
   return(list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly))
 }
+
 
 # function to create spatial predictions from model----
 predict_model <- function(Model) {
@@ -368,7 +369,7 @@ predict_model <- function(Model) {
 }
 
 # function to create spatial predictions from model----
-predict_model2 <- function(Model, Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000) {
+predict_model2 <- function(Model, Verbose = FALSE, N_retry=10, Initial_Tlimit = 1000) {
   # Model = the fitted model (an output from fit_model)
   
   # define objects
@@ -483,50 +484,149 @@ predict_model2 <- function(Model, Verbose = FALSE, N_retry=3, Initial_Tlimit = 1
   return(list(Layer = Layer, PModel = PModel, NModel = NModel))
 }
 
-# # Predictions from model using fitted value----
-# predict_model3 <- function(Model){
-#   # Model = the fitted model (an output from fit_model or Select_model)
-#   
-#   # define objects
-#   PModel = Model$PModel
-#   NModel = Model$NModel
-#   KMR = Model$KMR
-#   ClearType = Model$ClearType
-#   SpatUnits = Model$SpatUnits
-#   RespData = Model$RespData
-#   CovsCD = Model$CovsCD
-#   SA1sPoly = Model$SA1sPoly
-#   rm(Model)
-#   # get attribute table of spatial units and join covariates
-#   # get attribute table of spatial units and join covariates
-#   Covs <- SpatUnits[[KMR]] %>% st_drop_geometry() %>% as_tibble() %>% dplyr::select(-KMR, -Shape_Length, -Shape_Area) %>% bind_cols(CovsCD[[KMR]]) %>% mutate(SUID = 1:n())
-#   
-#   # get response data and ensure clearing is < woody vegetation
-#   Response <- RespData[[KMR]] %>% mutate(YAg = sum.aloss, YIn = sum.iloss, YFo = sum.floss, N = sum.woody) %>% mutate(N = ifelse(N < YAg + YIn + YFo, YAg + YIn + YFo, N)) %>% dplyr::select(-sum.aloss, -sum.iloss, -sum.floss, -sum.woody)
-#   
-#   # response - how many cells cleared over time period
-#   if (ClearType == 1) {
-#     R <- Response %>% dplyr::select(YAg) %>% as.matrix()
-#   } else if (ClearType == 2) {
-#     R <- Response %>% dplyr::select(YIn) %>% as.matrix()
-#   } else if (ClearType == 3) {
-#     R <- Response %>% dplyr::select(YFo) %>% as.matrix()
-#   }
-#   
-#   # number of trials - how many cells woody at start of time period
-#   NT <- Response %>% dplyr::select(N) %>% as.matrix()
-#   
-#   WoodyBin <- R[which(NT > 0)] # only make predictions for properties with woody vegetation in 2011
-#   WoodyBin <- as.vector(ifelse(RPPred > 0, 1, 0)) # recode to binary cleared/not cleared
-# 
-#   Layer <- SpatUnits[[KMR]] %>% bind_cols(R = as.vector(R), NT = as.vector(NT), SUID = Covs$SUID) %>% dplyr::filter(NT > 0) %>% mutate(ActualProp =  ifelse(NT > 0, R / NT, NA)) # only for properties with woody cover
-#   PredictionsP <- as_tibble(PModel$summary.fitted.values$mean) %>% bind_cols(SUID = as.vector(Covs$SUID[which(NT > 0)]))
-#   names(PredictionsP) <- c("PredP", "SUID")
-#   PredictionsN <- as_tibble(NModel$summary.fitted.values$mean) %>% bind_cols(SUID = as.vector(Covs$SUID[which(NT > 0)]))
-#   names(PredictionsN) <- c("PredN", "SUID")
-#   PredictionsCombined <- PredictionsP %>% left_join(PredictionsN, by = join_by(SUID == SUID)) %>% mutate(PredAll = PredP * PredN)
-#   Layer <- Layer %>% left_join(PredictionsCombined, by = join_by(SUID == SUID)) %>% dplyr::select(-Shape_Length, -Shape_Area) 
-# }
+# function to create spatial predictions by sampling from posterior----
+predict_model3 <- function(model, N = 1000, RandEff = "SA1ID", verbose = TRUE){
+  # model = the fitted model (an output from fit_model)
+  # N = number of samples to draw from the posterior
+  # RandEff = the name of the random effect
+  
+  # define objects
+  PModel = model$PModel
+  NModel = model$NModel
+  KMR = model$KMR
+  ClearType = model$ClearType
+  SpatUnits = model$SpatUnits
+  RespData = model$RespData
+  CovsCD = model$CovsCD
+  SA1sPoly = model$SA1sPoly
+  rm(model)
+  
+  # get attribute table of spatial units and join covariates
+  Covs <- SpatUnits[[KMR]] %>% st_drop_geometry() %>% as_tibble() %>% dplyr::select(-KMR, -Shape_Length, -Shape_Area) %>% bind_cols(CovsCD[[KMR]]) %>% mutate(SUID = 1:n())
+  
+  # get response data and ensure clearing is < woody vegetation
+  Response <- RespData[[KMR]] %>% mutate(YAg = sum.aloss, YIn = sum.iloss, YFo = sum.floss, N = sum.woody) %>% mutate(N = ifelse(N < YAg + YIn + YFo, YAg + YIn + YFo, N)) %>% dplyr::select(-sum.aloss, -sum.iloss, -sum.floss, -sum.woody , -sum.Khab)
+  
+  # response - how many cells cleared over time period
+  if (ClearType == 1) {
+    R <- Response %>% dplyr::select(YAg) %>% as.matrix()
+  } else if (ClearType == 2) {
+    R <- Response %>% dplyr::select(YIn) %>% as.matrix()
+  } else if (ClearType == 3) {
+    R <- Response %>% dplyr::select(YFo) %>% as.matrix()
+  }
+  
+  # number of trials - how many cells woody at start of time period
+  NT <- Response %>% dplyr::select(N) %>% as.matrix()
+  
+  # format data for prediction
+  CPred <- Covs[which(Response$N>0),] %>% dplyr::select(-SA1, -SUID) # Get Covariate data only for properties with woody vegetation
+  CPred_MM <- model.matrix(~., data = CPred) # model matrix
+  SA1IDs <- Covs[which(Response$N>0),] %>% mutate(SA1ID = as.integer(factor(SA1))) %>% dplyr::select(SA1ID, SUID)#%>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
+  
+  # get posterior samples for each model
+  if(verbose) {cat("\nSampling from posterior...\n")}
+  PModel_samp <- inla.posterior.sample(N, PModel)
+  NModel_samp <- inla.posterior.sample(N, NModel)
+  if(verbose) {cat("inla.posterior.sample object size: \n PModel: ", format(object.size(PModel_samp), units = "auto"), 
+                   "\n NModel: ",format(object.size(NModel_samp), units = "auto"))}
+  
+  # get fixed effects samples
+  PModel_samp_fixed <- sapply(PModel_samp, function(x) x$latent[(nrow(x$latent)-length(PModel$names.fixed)+1):nrow(x$latent),1]) %>% as.matrix()
+  NModel_samp_fixed <- sapply(NModel_samp, function(x) x$latent[(nrow(x$latent)-length(NModel$names.fixed)+1):nrow(x$latent),1]) %>% as.matrix()
+  if(verbose) {cat("\n\nFixed effects samples: \n PModel: ", format(object.size(PModel_samp_fixed), units = "auto"), 
+                   "\n NModel: ",format(object.size(NModel_samp_fixed), units = "auto"))}
+  
+  # get random effects samples
+  ### Ref: A tutorial in spatial and spatio-temporal models with R-INLA (https://discovery.ucl.ac.uk/id/eprint/1415919/1/Baio_BlaCamBaiRue.pdf) Page 11
+  if(verbose) {cat("\n\nExtracting random effects samples...\n")}
+  RandEff_PId <- which(PModel$misc$configs$contents$tag == RandEff)
+  RandEff_PInd <- PModel$misc$configs$contents$start[RandEff_PId] - 1 + (1:(PModel$misc$configs$contents$length[RandEff_PId]))
+  PModel_samp_rand_mt <- sapply(PModel_samp, function(x){x$latent[RandEff_PInd[1:(length(RandEff_PInd)/2)],1]}) %>% as_tibble(rownames = "RName") %>% mutate(SA1ID = as.integer(str_extract(RName, "(?<=:)[0-9]+"))) %>% dplyr::select(-RName) %>% right_join(x= ., y=SA1IDs, by = "SA1ID") %>% arrange(SUID) %>% dplyr::select(-SA1ID, -SUID) %>% as.matrix()
+  
+  RandEff_NId <- which(NModel$misc$configs$contents$tag == RandEff)
+  RandEff_NInd <- NModel$misc$configs$contents$start[RandEff_NId] - 1 + (1:(NModel$misc$configs$contents$length[RandEff_NId]))
+  NModel_samp_rand_mt <- sapply(NModel_samp, function(x){x$latent[RandEff_NInd[1:(length(RandEff_NInd)/2)],1]}) %>% as_tibble(rownames = "RName") %>% mutate(SA1ID = as.integer(str_extract(RName, "(?<=:)[0-9]+"))) %>% dplyr::select(-RName) %>% right_join(x= ., y=SA1IDs, by = "SA1ID") %>% arrange(SUID) %>% dplyr::select(-SA1ID, -SUID) %>% as.matrix()
+  rm(PModel_samp, NModel_samp)
+  if(verbose) {cat("Random effects samples: \n PModel: ", format(object.size(PModel_samp_rand_mt), units = "auto"), 
+                   "\n NModel: ",format(object.size(NModel_samp_rand_mt), units = "auto"))}
+  
+  # Prediction for fixed effects
+  if(verbose) {cat("\n\nMatrix multiplication for fixed effects...\n")}
+  PredP_samp_fixed_mt <- apply(PModel_samp_fixed , MARGIN = 2, function(Model_samp) {CPred_MM %*% Model_samp }) 
+  rm(PModel_samp_fixed)
+  PredN_samp_fixed_mt <- apply(NModel_samp_fixed , MARGIN = 2, function(Model_samp) {CPred_MM %*% Model_samp })
+  rm(NModel_samp_fixed)
+  if(verbose) {cat("Fixed effects prediction matrix size: \n PModel: ", format(object.size(PredP_samp_fixed_mt), units = "auto"), 
+                   "\n NModel: ",format(object.size(PredN_samp_fixed_mt), units = "auto"))}
+  
+  # # Prediction by for both fixed and random effects
+  # PredP_lk <- PredP_samp_fixed_mt + PModel_samp_rand_mt
+  # PredN_lk <- PredN_samp_fixed_mt + NModel_samp_rand_mt
+  
+  # Calculate the probability
+  PredP <- (exp(PredP_samp_fixed_mt + PModel_samp_rand_mt)/(1+exp(PredP_samp_fixed_mt + PModel_samp_rand_mt)))
+  PredN <- (exp(PredN_samp_fixed_mt + NModel_samp_rand_mt)/(1+exp(PredN_samp_fixed_mt + NModel_samp_rand_mt)))
+  PredAll <- PredP * PredN
+  rm(PredP_samp_fixed_mt , PModel_samp_rand_mt, PredN_samp_fixed_mt , NModel_samp_rand_mt)
+  
+  
+  if(verbose) {cat("\n\n\nSpatialising predictions...\n")}
+  Layer <- SpatUnits[[KMR]] %>% bind_cols(Woody_Clrtype = as.vector(R), Woody = as.vector(Response$N), SUID = Covs$SUID) %>% dplyr::filter(Woody > 0) %>% mutate(ActualProp =  ifelse(Woody > 0, Woody_Clrtype / Woody, NA)) # only for properties with woody cover
+  PredictionsP <- rowMeans(PredP) %>% bind_cols(SUID = as.vector(Covs$SUID[which(Response$N>0)])) %>% rename("PredP" = "...1")
+  PredictionsN <- rowMeans(PredN) %>% bind_cols(SUID = as.vector(Covs$SUID[which(Response$N>0)])) %>% rename("PredN" = "...1")
+  PredictionsAll <- rowMeans(PredAll) %>% bind_cols(SUID = as.vector(Covs$SUID[which(Response$N>0)])) %>% rename("PredAll" = "...1")
+  PredictionsCombined <- PredictionsP %>% left_join(PredictionsN, by = join_by(SUID == SUID)) %>% left_join(PredictionsAll, by = join_by(SUID == SUID))
+  Layer <- Layer %>% left_join(PredictionsCombined, by = join_by(SUID == SUID)) %>% dplyr::select(-Shape_Length, -Shape_Area)
+  if(verbose) {cat("Spatialised predictions: \n\n")
+    print(head(Layer))}
+
+  return(list(Layer = Layer, PModel = PModel, NModel = NModel))
+}
+
+
+# function to refit model from selected model ----
+# To include control.compute = list(dic = TRUE, config = TRUE)
+
+refit_model <- function(KMR = "CC", ClearType = 1, ModelDir = "output/models/"){
+
+  if (ClearType == 1) {
+    CT <- "Ag"
+  } else if (ClearType == 2) {
+    CT <- "In"
+  } else if (ClearType == 3) {
+    CT <- "Fo"
+  }
+  
+  # read model selection results for both forward and backward selection
+  SelModel_BC <- qread(paste0(ModelDir, "SelModel_", KMR, "_" , CT , "_BC.qs"))
+  SelModel_FC <- qread(paste0(ModelDir, "SelModel_", KMR, "_" , CT , "_FC.qs"))
+  
+  # Find minimum DIC values recorded in the model selection steps (WHILE LOOP)
+  MinDIC_BC <- SelModel_BC$DIC_ls[which.min(unlist(SelModel_BC$DIC_ls))]
+  MinDIC_FC <- SelModel_FC$DIC_ls[which.min(unlist(SelModel_FC$DIC_ls))]
+  MinDIC_BC_DIC <- unlist(MinDIC_BC)
+  MinDIC_FC_DIC <- unlist(MinDIC_FC)
+  
+  # Select the best model (Forward or Backward) based on the minimum DIC values
+  Best_Mod <- if_else(MinDIC_BC_DIC < MinDIC_FC_DIC, "BC", "FC")
+  cat("Best Model for  ", KMR, ": ", Best_Mod, "\n")
+  
+  Best_Mod <- if(Best_Mod == "BC"){Best_Mod <- SelModel_BC} else {Best_Mod <- SelModel_FC}
+  
+  SpatUnits = Best_Mod$SpatUnits
+  RespData = Best_Mod$RespData
+  CovsCD = Best_Mod$CovsCD
+  SA1sPoly = Best_Mod$SA1sPoly
+  
+  Model <- fit_model2(KMR, ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly, Verbose = FALSE)
+  
+  # return models
+  output_FPath <- file.path(ModelDir, paste0("Model_", KMR, "_" , CT , ".qs"))
+  qsave(Model, file = output_FPath)
+  
+  return(list(PModel = Model$PModel, NModel = Model$NModel, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly))
+}
 
 
 # function for model selection----
@@ -1020,4 +1120,63 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
     qsave(Model, file = output_FPath)
   }
   return(list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly, DIC_ls = DIC_ls, ERROR_ls = ERROR_ls))
+}
+
+
+# Function to combine predictions across KMR and write output ----
+Combine_Predictions <- function(ClearType = 1, Prediction_DIR = "output/predictions/", WRITE_SHP = TRUE, WRITE_DATA = TRUE){
+  
+  if (ClearType == 1) {
+    CT <- "Ag"
+  } else if (ClearType == 2) {
+    CT <- "In"
+  } else if (ClearType == 3) {
+    CT <- "Fo"
+  }
+  
+  Pred_Flist <- list.files(Prediction_DIR, pattern = paste0("^Pred.*", CT ,"\\.qs$"), full.names = TRUE)
+  
+  Layer_list <- map(Pred_Flist, ~qread(.x)$Layer)
+  
+  Layer_comb <- do.call(rbind, Layer_list)
+  names(Layer_comb) <- c("KMR" , "SA1" , "Wdy_Clr" , "Woody" , "SUID" , "ActlPrp" , "PredP" , "PredN" , "PredAll" , "geometry")
+  st_geometry(Layer_comb) <- "geometry"
+  
+  if (WRITE_SHP) {
+    SHP_Filename <- file.path(Prediction_DIR, paste0("Pred_", CT, ".shp"))
+    st_write(Layer_comb, SHP_Filename, delete_layer = TRUE)
+  }
+  if (WRITE_DATA) {
+    DATA_Filename <- file.path(Prediction_DIR, paste0("Pred_", CT, ".qs"))
+    qsave(Layer_comb, DATA_Filename)
+  }
+  
+  return(Layer_comb)
+}
+
+# Function to prepare Koala habitat data ----
+Prep_Khab <- function(ZStats_Woody, KMR_name_df){
+  # ZStats_Woody: output from section "Select all covariates for each clearing type" *(clearing type data filtering above)
+  # KMR_List: A dataframe consist of KMR full name and KMR abbreviation
+  # KMR <- names(ZStats_Woody)
+  Khab_data <- imap(ZStats_Woody, function(ZStat_Woody, KMR_a) {ZStat_Woody %>% mutate(KMR_a = KMR_a, SUID = 1:n())}) %>% 
+    do.call(rbind, .) %>% 
+    left_join(KMR_name_df, by = join_by(KMR_a == KMR_a))
+  return(Khab_data)
+}
+
+# Function to calculate the risk of Koala habitat loss ----
+Get_Khab_loss_risk <- function(Pred_data, Khab_data){
+  # Pred_data: .qs or .shp output from Combine_Predictions function
+  # Khab_data: .qs output from Prep_Khab function. This should consist of KHAB, SUID and KMR
+  
+  Pred_Khab <- Pred_data %>% left_join(Khab_data, by = join_by(SUID == SUID, KMR == KMR)) %>% 
+    mutate(Khab_P = sum.Khab/Woody, KhabRisk = PredAll*Khab_P)
+  
+  # Warning message if woody vegetation is greater than Koala habitat 
+  if(nrow(Pred_Khab[Pred_Khab$Woody < Pred_Khab$Khab,])>0){message("Woody vegetation greater than Koala habitat!!! \n\n")}
+  
+  Pred_Khab <- Pred_Khab %>% 
+    dplyr::select(Woody, Risk = PredAll, Khab_P, KhabRisk, KMR, SUID)
+  return(Pred_Khab)
 }
