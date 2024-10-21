@@ -1097,7 +1097,7 @@ NSW_urb_pt %>% filter(UCL_NAME16 %in% c("Oberon"))
 
 Inset_BL_Ag <- data.frame(x = c(9376800, 9435500, 9464100), y = c(4726000, 4826500, 4911747))
 Inset_BL_In <- data.frame(x = c(9599470, 9660498, 9769700), y = c(4352856, 4477888, 4593377))
-Inset_BL_Fo <- data.frame(x = c(9779110, 9495375, 9327460), y = c(4903177, 4415825, 4196286))
+Inset_BL_Fo <- data.frame(x = c(9779110, 9503821, 9327460), y = c(4903177, 4379838, 4196286))
 
 #### File names
 FilenamePath_PNG_Ag <- "output/figures/Khab_risk_Ag_map1.png"
