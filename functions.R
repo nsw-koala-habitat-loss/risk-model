@@ -558,15 +558,16 @@ predict_model3 <- function(model, N = 1000, RandEff = "SA1ID", verbose = TRUE){
   PredN_samp_fixed_mt <- apply(NModel_samp_fixed , MARGIN = 2, function(Model_samp) {CPred_MM %*% Model_samp })
   rm(NModel_samp_fixed)
   if(verbose) {cat("Fixed effects prediction matrix size: \n PModel: ", format(object.size(PredP_samp_fixed_mt), units = "auto"), 
-                   "\n NModel: ",format(object.size(PredN_samp_fixed_mt), units = "auto"))}
+                   "\n NModel: ",format(object.size(PredN_samp_fixed_mt), units = "auto"), "\n\n")}
   
   # # Prediction by for both fixed and random effects
   # PredP_lk <- PredP_samp_fixed_mt + PModel_samp_rand_mt
   # PredN_lk <- PredN_samp_fixed_mt + NModel_samp_rand_mt
+  gc()
   
   # Calculate the probability
-  PredP <- (exp(PredP_samp_fixed_mt + PModel_samp_rand_mt)/(1+exp(PredP_samp_fixed_mt + PModel_samp_rand_mt)))
-  PredN <- (exp(PredN_samp_fixed_mt + NModel_samp_rand_mt)/(1+exp(PredN_samp_fixed_mt + NModel_samp_rand_mt)))
+  PredP <- ifelse(is.finite(exp(PredP_samp_fixed_mt + PModel_samp_rand_mt)/(1+exp(PredP_samp_fixed_mt + PModel_samp_rand_mt))),(exp(PredP_samp_fixed_mt + PModel_samp_rand_mt)/(1+exp(PredP_samp_fixed_mt + PModel_samp_rand_mt))), 1 )
+  PredN <- ifelse(is.finite(exp(PredN_samp_fixed_mt + NModel_samp_rand_mt)/(1+exp(PredN_samp_fixed_mt + NModel_samp_rand_mt))),(exp(PredN_samp_fixed_mt + NModel_samp_rand_mt)/(1+exp(PredN_samp_fixed_mt + NModel_samp_rand_mt))), 1 )
   PredAll <- PredP * PredN
   rm(PredP_samp_fixed_mt , PModel_samp_rand_mt, PredN_samp_fixed_mt , NModel_samp_rand_mt)
   
@@ -1125,7 +1126,11 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
 
 # Function to combine predictions across KMR and write output ----
 Combine_Predictions <- function(ClearType = 1, Prediction_DIR = "output/predictions/", WRITE_SHP = TRUE, WRITE_DATA = TRUE){
-  
+  # ClearType: 1 = Agriculture, 2 = Infrastructure, 3 = Forestry
+  # Prediction_DIR: Directory containing the prediction files, output from predict_model* function
+  # WRITE_SHP: Write shapefile output (Default = TRUE: write output shapefile, FALSE: do not write output shapefile)
+  # WRITE_DATA: Write .qs output (Default = TRUE: write output .qs, FALSE: do not write output .qs)
+
   if (ClearType == 1) {
     CT <- "Ag"
   } else if (ClearType == 2) {
@@ -1179,4 +1184,243 @@ Get_Khab_loss_risk <- function(Pred_data, Khab_data){
   Pred_Khab <- Pred_Khab %>% 
     dplyr::select(Woody, Risk = PredAll, Khab_P, KhabRisk, KMR, SUID)
   return(Pred_Khab)
+}
+
+# Function to process model fitting and covariate extraction ----
+Get_cov_coeff_long <- function(ClearType) {
+  # ClearType
+  if(ClearType == 1){
+    CT <- "Ag"
+  } else if(ClearType == 2){
+    CT <- "In"
+  } else if(ClearType == 3){
+    CT <- "Fo"
+  }
+  
+  # Read the required datasets based on the clear type - CT
+  SUs <- qread(paste0("output/spatial_units/sus_", CT, ".qs"))
+  ZStats_Woody <- qread(paste0("output/data/ZStats_Woody_", CT, ".qs"))
+  ZStats_Covs <- qread(paste0("output/data/ZStats_Covs_", CT, ".qs"))
+  SA1s <- qread("output/spatial_units/sa1s.qs")
+  
+  KMRs <- names(ZStats_Covs)
+  kmr <- KMRs[1]
+  
+  # Fit the model using the specified CT
+  Model <- fit_model2(KMR = kmr, ClearType = ClearType, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs, 
+                      SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry = 3, Initial_Tlimit = 1000, OutputDir = NULL)
+  
+  # Get summary of the model's fixed effects
+  Cov_ls <- summary(Model$PModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>% 
+    dplyr::select(Covariate) %>% arrange(Covariate)
+  
+  Cov_ls_long <- data.frame()
+  
+  # Loop through each KMR and gather covariate and coefficient data
+  for (kmr in KMRs) {
+    MODEL <- qread(paste0("output/models/Model_", kmr, "_", CT, ".qs"))
+    
+    Cov <- summary(MODEL$PModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>%
+      dplyr::select(Covariate) %>% unlist()
+    
+    Cof_PModel <- summary(MODEL$PModel)$fixed[,1]
+    Cof_PModel <- if_else(Cof_PModel > 0, 1, -1)
+    
+    Cof_NModel <- summary(MODEL$NModel)$fixed[,1]
+    Cof_NModel <- if_else(Cof_NModel > 0, 1, -1)
+    
+    Cov_cof <- as.data.frame(cbind(Cov, Cof_PModel, Cof_NModel))
+    rownames(Cov_cof) <- NULL
+    
+    Cov_ls_model <- left_join(Cov_ls, Cov_cof, by = join_by("Covariate" == "Cov")) %>% mutate(kmr = kmr)
+    Cov_ls_long <- rbind(Cov_ls_long, Cov_ls_model)
+  }
+  
+  Cof_PModel_CT <- paste0("Cof_PModel_", CT)
+  Cof_NModel_CT <- paste0("Cof_NModel_", CT)
+  
+  # Change all NA to 0
+  Cov_ls_long[[Cof_PModel_CT]] <- ifelse(is.na(Cov_ls_long$Cof_PModel), 0, Cov_ls_long$Cof_PModel)
+  Cov_ls_long[[Cof_NModel_CT]] <- ifelse(is.na(Cov_ls_long$Cof_NModel), 0, Cov_ls_long$Cof_NModel)
+  
+  return(Cov_ls_long)
+}
+
+# Function to plot Single deforestation risk / Koala habitat loss ----
+PLOTMAP_risk_NSW <- function(DATA, FILL, LEGEND_Title = "Deforestation\nrisk", ClearType = 1, FilenamePath_PNG = NULL, PNG_width = 11, PNG_height = 11, PNG_dpi = 300){
+  # DATA: Spatial polygon data with deforestation risk or Koala habitat loss risk for each polygon
+  # FILL: Variable name to be plotted
+  # LEGEND_Title: Text for lebeling the 
+  # ClearType: 1 = Ag, 2 = In, 3 = Fo
+  # FilenamePath_PNG: Directory to save the plot as a PNG file (optional) {set to NULL to not save}
+  
+  CT <- if(ClearType == 1) {"Ag"} else if(ClearType == 2) {"In"} else if(ClearType == 3) {"Fo"} else {"Error"}
+  
+  # Plot the deforestation risk or Koala habitat loss risk
+  Plot <- ggplot()+
+    
+    geom_sf(data = STE, fill = "grey80", color = "white", lwd = 0.2)+
+    
+    geom_sf(data = DATA, aes(fill = {{FILL}}), color = NA)+
+    geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.2)+
+    scale_fill_gradientn(colours = hcl.colors(8, palette = "Blues 3" ,rev = TRUE), name = LEGEND_Title)+
+    
+    # start a new scale
+    new_scale_colour() +
+    
+    geom_sf(data = NSW_urb_sel_pt, colour = "red3", size = 1)+
+    geom_text_repel(data = NSW_urb_sel_pt, aes(x = x, y = y , label = UCL_NAME16), 
+                    fontface = "bold", nudge_y = -5, size = 3,
+                    color = "black",     # text color
+                    bg.color = "grey90", # shadow color
+                    bg.r = 0.05)+          # shadow radius
+    
+    ggspatial::annotation_scale(location = "br", pad_y = unit(1, "cm"))+
+    ggspatial::annotation_north_arrow(location = "br", which_north = "true", pad_y = unit(2, "cm"))+
+    
+    theme(axis.ticks.x = element_blank(),axis.text.x = element_blank(), axis.line.x = element_blank())+
+    theme(axis.ticks.y = element_blank(),axis.text.y = element_blank(), axis.line.y = element_blank())+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+    theme(legend.position = c(0.9, 0.3))+
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank())+
+    coord_sf(xlim = st_bbox(KMR_shp)[c(1,3)], ylim = st_bbox(KMR_shp)[c(2,4)], expand = TRUE)
+  
+  if(!is.null(FilenamePath_PNG)){
+    if(tools::file_ext(FilenamePath_PNG) != "png"){warning("Filename extension should be '.png'")}
+    ggsave(FilenamePath_PNG, Plot, width = PNG_width, height = PNG_height, dpi = PNG_dpi)
+  }
+  return(Plot)
+}
+
+# Function to plot Maps with Insets deforestation risk / Koala habitat loss ----
+PLOTMAP_risk_with_Insets <- function(DATA, FILL, LEGEND_Title = "Koala habitat\nloss risk", ClearType = 1, 
+                                     Inset_BL, Inset_dim = 100000,
+                                     URB_PT_Main =NULL, URB_PT_SUB1, URB_PT_SUB2,  URB_PT_SUB3, 
+                                     FilenamePath_PNG = NULL, PNG_width = 11, PNG_height = 11, PNG_dpi = 300){
+  # DATA: Spatial polygon data with deforestation risk or Koala habitat loss risk for each polygon
+  # ClearType: 1 = Ag, 2 = In, 3 = Fo
+  # Inset_BL: Dataframe with x,y of the Bottom left corner of the inset map
+  # Inset_dim: Dimension of the inset map
+  # URB_PT_*: list of urban points label for main map, and sub maps (get exact name from NSW_urb_pt$UCL_NAME16)
+  # Rename_URB_PT_*: list of names to replace existing name of the urban points label for main map, and sub maps
+  # FilenamePath_PNG: Directory to save the plot as a PNG file (optional) {set to NULL to not save}
+  
+  CT <- if(ClearType == 1) {"Ag"} else if(ClearType == 2) {"In"} else if(ClearType == 3) {"Fo"} else {"Error"}
+  
+  Map_main <- ggplot() +
+    
+    geom_sf(data = STE, fill = "grey80", color = "white", lwd = 0.2)+
+    
+    geom_sf(data = DATA, aes(fill = {{FILL}}), color = NA)+
+    geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.2)+
+    scale_fill_gradientn(colours = hcl.colors(8, palette = "Reds 3" ,rev = TRUE), name = LEGEND_Title)+
+    
+    # start a new scale
+    new_scale_colour() +
+    
+    # selected urban points
+    geom_sf(data = NSW_urb_sel_pt, colour = "black", size = 1)+
+    geom_text_repel(data = NSW_urb_sel_pt, aes(x = x, y = y , label = UCL_NAME16),
+                    nudge_y = -5, size = 4, color = "black", bg.color = "grey90", bg.r = 0.05)+
+    
+    
+    geom_rect(aes(xmin = Inset_BL[1,1], xmax = Inset_BL[1,1]+100000, ymin = Inset_BL[1,2], ymax = Inset_BL[1,2]+100000), fill = NA, colour = "black", linewidth = 0.6) +
+    geom_rect(aes(xmin = Inset_BL[2,1], xmax = Inset_BL[2,1]+100000, ymin = Inset_BL[2,2], ymax = Inset_BL[2,2]+100000) , fill = NA, colour = "black", linewidth = 0.6) + 
+    geom_rect(aes(xmin = Inset_BL[3,1], xmax = Inset_BL[3,1]+100000, ymin = Inset_BL[3,2], ymax = Inset_BL[3,2] + 100000), fill = NA, colour = "black", linewidth = 0.6) +
+    
+    geom_text(data = data.frame(x = Inset_BL[1,1] + 100000/2, y = Inset_BL[1,2] + 100000/2), aes(x = x, y = y, label = "A"), size = 4, fontface = "bold", color = "black", bg.color = "grey90", bg.r = 0.05)+
+    geom_text(data = data.frame(x = Inset_BL[2,1] + 100000/2, y = Inset_BL[2,2] + 100000/2), aes(x = x, y = y, label = "B"), size = 4, fontface = "bold", color = "black", bg.color = "grey90", bg.r = 0.05)+
+    geom_text(data = data.frame(x = Inset_BL[3,1] + 100000/2, y = Inset_BL[3,2] + 100000/2), aes(x = x, y = y, label = "C"), size = 4, fontface = "bold", color = "black", bg.color = "grey90", bg.r = 0.05)+
+    
+    ggspatial::annotation_scale(location = "bl", pad_y = unit(0.5, "cm"))+
+    ggspatial::annotation_north_arrow(location = "bl", which_north = "true", pad_y = unit(1, "cm"))+
+    
+    theme(axis.ticks.x = element_blank(),axis.text.x = element_blank(), axis.line.x = element_blank())+
+    theme(axis.ticks.y = element_blank(),axis.text.y = element_blank(), axis.line.y = element_blank())+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+    theme(legend.position = c(0.95, 0.1))+
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank())+
+    coord_sf(xlim = st_bbox(KMR_shp)[c(1,3)], ylim = st_bbox(KMR_shp)[c(2,4)], expand = FALSE)
+  
+  Map_sub1 <- ggplot() +
+    
+    geom_sf(data = STE, fill = "grey80", color = "white", lwd = 0.2)+
+    
+    geom_sf(data = DATA, aes(fill = {{FILL}}), color = NA)+
+    # geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.2)+
+    scale_fill_gradientn(colours = hcl.colors(8, palette = "Reds 3" ,rev = TRUE), name = expression("Koala habitat\nloss risk"))+
+    
+    # start a new scale
+    new_scale_colour() +
+    
+    geom_sf(data = (NSW_urb_pt %>% filter(UCL_NAME16 %in% URB_PT_SUB1)), colour = "black", size = 2)+
+    geom_text_repel(data = (NSW_urb_pt %>% filter(UCL_NAME16 %in% URB_PT_SUB1)), aes(x = x, y = y , label = UCL_NAME16),
+                    nudge_y = -5, size = 4, color = "black", bg.color = "grey90", bg.r = 0.05)+
+    
+    labs(tag = "A") +
+    theme(plot.tag.position = "topleft", plot.tag.location = "panel") +
+    
+    theme(axis.ticks.x = element_blank(),axis.text.x = element_blank(), axis.line.x = element_blank())+
+    theme(axis.ticks.y = element_blank(),axis.text.y = element_blank(), axis.line.y = element_blank())+
+    theme(legend.position = "none")+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank())+
+    coord_sf(xlim = c(Inset_BL[1,1],  Inset_BL[1,1]+100000 ), ylim =  c( Inset_BL[1,2], Inset_BL[1,2]+100000), expand = FALSE)
+  
+  Map_sub2 <- ggplot() +
+    
+    geom_sf(data = STE, fill = "grey80", color = "white", lwd = 0.2)+
+    
+    geom_sf(data = DATA, aes(fill = {{FILL}}), color = NA)+
+    # geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.2)+
+    scale_fill_gradientn(colours = hcl.colors(8, palette = "Reds 3" ,rev = TRUE), name = expression("Koala habitat\nloss risk"))+
+    
+    # start a new scale
+    new_scale_colour() +
+    
+    geom_sf(data = (NSW_urb_pt %>% filter(UCL_NAME16  %in% URB_PT_SUB2)), colour = "black", size = 2)+
+    geom_text_repel(data = (NSW_urb_pt %>% filter(UCL_NAME16 %in% URB_PT_SUB2)), aes(x = x, y = y , label = UCL_NAME16),
+                    nudge_y = -5, size = 4, color = "black", bg.color = "grey90", bg.r = 0.05)+
+    
+    labs(tag = "B") +
+    theme(plot.tag.position = "topleft", plot.tag.location = "panel") +
+    
+    theme(axis.ticks.x = element_blank(),axis.text.x = element_blank(), axis.line.x = element_blank())+
+    theme(axis.ticks.y = element_blank(),axis.text.y = element_blank(), axis.line.y = element_blank())+
+    theme(legend.position = "none")+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank())+
+    coord_sf(xlim = c(Inset_BL[2,1],  Inset_BL[2,1]+100000 ), ylim =  c( Inset_BL[2,2], Inset_BL[2,2]+100000), expand = FALSE)
+  
+  Map_sub3 <- ggplot() +
+    
+    geom_sf(data = STE, fill = "grey80", color = "black", lwd = 0.2)+
+    
+    geom_sf(data = DATA, aes(fill = {{FILL}}), color = NA)+
+    # geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.2)+
+    scale_fill_gradientn(colours = hcl.colors(8, palette = "Reds 3" ,rev = TRUE), name = expression("Koala habitat\nloss risk"))+
+    
+    # start a new scale
+    new_scale_colour() +
+    
+    geom_sf(data = (NSW_urb_pt %>% filter(UCL_NAME16  %in% URB_PT_SUB3)), colour = "black", size = 2)+
+    geom_text_repel(data = (NSW_urb_pt %>% filter(UCL_NAME16 %in% URB_PT_SUB3)), aes(x = x, y = y , label = UCL_NAME16),
+                    nudge_y = -5, size = 4, color = "black", bg.color = "grey90", bg.r = 0.05)+
+    
+    labs(tag = "C") +
+    theme(plot.tag.position = "topleft", plot.tag.location = "panel") +
+    
+    theme(axis.ticks.x = element_blank(),axis.text.x = element_blank(), axis.line.x = element_blank())+
+    theme(axis.ticks.y = element_blank(),axis.text.y = element_blank(), axis.line.y = element_blank())+
+    theme(legend.position = "none")+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank())+
+    coord_sf(xlim = c(Inset_BL[3,1],  Inset_BL[3,1]+100000 ), ylim =  c( Inset_BL[3,2], Inset_BL[3,2]+100000), expand = FALSE)
+
+  Map_IN <- Map_sub1 + Map_sub2 + Map_sub3
+  FINAL_map <- (Map_main / Map_IN) + plot_layout(widths = unit(c(19, 19), c("cm", "cm")), heights = unit(c(15.3, 6), c("cm", "cm")))
+  
+  ggsave(FilenamePath_PNG, FINAL_map, width = 21, height = 23, units = "cm", dpi = 300)
+
+  return(FINAL_map)
 }

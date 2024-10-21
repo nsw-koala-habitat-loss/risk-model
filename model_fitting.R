@@ -1123,30 +1123,34 @@ cat("\n\nSave Predictions to: ", output_name, "\n")
 qsave(Pred, output_name)
 
 # Generate shapefile output----
-walk(1:3, Combine_Predictions)
+walk(1:3, ~Combine_Predictions(ClearType = .x, Prediction_DIR = "output/predictions/", WRITE_SHP = TRUE, WRITE_DATA = TRUE))
 
 
 
 # Koala habitat loss risk ----
 
-KMR_DF <- Pred_Ag %>% st_drop_geometry() %>%  select(KMR) %>% unique() %>% mutate(KMR_a = str_extract_all(KMR, "\\b[A-Za-z]") %>% sapply(paste, collapse = ""))
+## Load predictions output data and Woody vegetation data (containing Koala habitat loss column)
+Pred_Ag <- qread("output/predictions/Pred_Ag.qs")
+Pred_In <- qread("output/predictions/Pred_In.qs")
+Pred_Fo <- qread("output/predictions/Pred_Fo.qs")
 
 ZStats_Woody_Ag <- qread("output/data/ZStats_Woody_Ag.qs")
 ZStats_Woody_In <- qread("output/data/ZStats_Woody_In.qs")
 ZStats_Woody_Fo <- qread("output/data/ZStats_Woody_Fo.qs")
 
-Khab_data_Ag <- Prep_Khab(ZStats_Woody_Ag, KMR_DF)
-Khab_data_In <- Prep_Khab(ZStats_Woody_In, KMR_DF)
-Khab_data_Fo <- Prep_Khab(ZStats_Woody_Fo, KMR_DF)
+## Lookup dataframe for KMR acronyms and KMR Full names
+KMR_DF <- Pred_Ag %>% st_drop_geometry() %>%  dplyr::select(KMR) %>% unique() %>% mutate(KMR_a = str_extract_all(KMR, "\\b[A-Za-z]") %>% sapply(paste, collapse = ""))
 
-Pred_Ag <- qread("output/predictions/Pred_Ag.qs")
-Pred_In <- qread("output/predictions/Pred_In.qs")
-Pred_Fo <- qread("output/predictions/Pred_Fo.qs")
+Khab_data_Ag <- Prep_Khab(ZStats_Woody = ZStats_Woody_Ag, KMR_name_df = KMR_DF)
+Khab_data_In <- Prep_Khab(ZStats_Woody = ZStats_Woody_In, KMR_name_df = KMR_DF)
+Khab_data_Fo <- Prep_Khab(ZStats_Woody = ZStats_Woody_Fo, KMR_name_df = KMR_DF)
 
-Khab_risk_Ag <- Get_Khab_loss_risk(Pred_Ag, Khab_data_Ag)
-Khab_risk_In <- Get_Khab_loss_risk(Pred_In, Khab_data_In)
-Khab_risk_Fo <- Get_Khab_loss_risk(Pred_Fo, Khab_data_Fo)
+## Calculate Koala habitat loss risk
+Khab_risk_Ag <- Get_Khab_loss_risk(Pred_data = Pred_Ag, Khab_data = Khab_data_Ag)
+Khab_risk_In <- Get_Khab_loss_risk(Pred_data = Pred_In, Khab_data = Khab_data_In)
+Khab_risk_Fo <- Get_Khab_loss_risk(Pred_data = Pred_Fo, Khab_data = Khab_data_Fo)
 
+## Save the output
 qsave(Khab_risk_Ag, file = "output/predictions/Khab_risk_Ag.qs", preset = "fast")
 qsave(Khab_risk_In, file = "output/predictions/Khab_risk_In.qs", preset = "fast")
 qsave(Khab_risk_Fo, file = "output/predictions/Khab_risk_Fo.qs", preset = "fast")
@@ -1155,9 +1159,8 @@ st_write(Khab_risk_Ag, "output/predictions/Khab_risk_Ag.shp", delete_layer = TRU
 st_write(Khab_risk_In, "output/predictions/Khab_risk_In.shp", delete_layer = TRUE, append = FALSE)
 st_write(Khab_risk_Fo, "output/predictions/Khab_risk_Fo.shp", delete_layer = TRUE, append = FALSE)
 
-
 ########################################################################################################################################################
-### This part can be deleted aftereverything is done 
+### This part can be deleted after everything is done 
 ########################################################################################################################################################
 Model <- qread("output/models/Model_CC_Ag.qs")
 model <- Model
@@ -1272,6 +1275,15 @@ if(verbose) {cat("Fixed effects prediction matrix size: \n PModel: ", format(obj
 PredP <- (exp(PredP_samp_fixed_mt + PModel_samp_rand_mt)/(1+exp(PredP_samp_fixed_mt + PModel_samp_rand_mt)))
 PredN <- (exp(PredN_samp_fixed_mt + NModel_samp_rand_mt)/(1+exp(PredN_samp_fixed_mt + NModel_samp_rand_mt)))
 PredAll <- PredP * PredN
+
+
+Model <- qread("output/models/Model_FW_Fo.qs")
+model <- Model
+# Check for NA is any cell of the data 
+Model$PModel$.arg$data %>% filter(if_any(everything(), ~is.na(.)))
+
+Pred_FW_Fo <- qread("output/predictions/Pred_FW_Fo.qs")
+Pred_FW_Fo$Layer %>% filter(if_any(everything(), ~is.na(.)))
 
 ########################################################################################################################################################
 Model <- qread("output/models/Model_CC_Ag.qs")
