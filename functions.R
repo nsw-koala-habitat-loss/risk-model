@@ -716,10 +716,9 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
     
     # Get a list of Full explanatory variables and explanatory variables yet to be tested
     left_explV_ls <- Full_explV_ls <- names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID))
-    # Placeholder for Selected explanatory variables and Best DIC
+    # Placeholder for Selected explanatory variables
     Sel_explV_ls <- list()
-    Best_DIC_ls <- list() ##**##
-    DIC_ls <- dDIC_ls <-  list() 
+    DIC_ls <- list() 
     
     ### Null Model----
     tic("Null Model")
@@ -732,19 +731,15 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
     ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H0, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     
     # Calculate DIC for the null model
-    Current_DIC <- ResultP$dic$dic + ResultN$dic$dic
+    Current_DIC <- if(!is.null(ResultP$dic$dic) && !is.null(ResultN$dic$dic)){ResultP$dic$dic + ResultN$dic$dic} else {Inf}
+    if(Current_DIC == Inf){ERROR_ls[length(ERROR_ls)+1] <- "H0"}
     Best_DIC <- Current_DIC
-    Current_dDIC <- Current_DIC + (2*0)
-    Best_dDIC <- Current_dDIC
-    
-    Best_DIC_ls[1] <- Best_DIC ##**##
-    names(Best_DIC_ls)[1] <- "H0" ##**##
     DIC_ls[1] <- Current_DIC 
-    dDIC_ls[1] <- Current_dDIC
-    names(DIC_ls)[1] <- names(dDIC_ls)[1] <- "H0" 
+    names(DIC_ls)[1] <- "H0" 
     
     toc(log = TRUE) # null model
     cat("DIC=", format(round(Current_DIC, 2)), "   ExplV: ", "1", "\n", sep = "")
+    
     
     while(length(left_explV_ls) > 0){
       #### Step forward... ----
@@ -762,27 +757,23 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
         # fit clearing versus no clearing model 
         ForP_H1 <- as.formula(paste0(paste("P", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
         tic(paste0("ExplV ", x, " of ", length(left_explV_ls)))
-        # cat("Running: ", deparse(ForP_H1), "\n", sep = "")
         ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
         
         # fit proportion cleared|clearing model
         ForN_H1 <- as.formula(paste0(paste("Prop", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
-        # cat(deparse(ForN_H1), "\n", sep = "")
         ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H1, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
         toc(log = TRUE) # current model
         
         # Calculate DIC for the current model and compare it with the best model
-        Current_DIC <- ResultP$dic$dic + ResultN$dic$dic
+        Current_DIC <- if(!is.null(ResultP$dic$dic) && !is.null(ResultN$dic$dic)){ResultP$dic$dic + ResultN$dic$dic} else {Inf}
+        if(Current_DIC == Inf){ERROR_ls[length(ERROR_ls)+1] <- explV}
         cat("DIC = ", format(round(Current_DIC, 2)), "   ExplV: ", explV, "\n", sep = "")
         DIC_ls[length(DIC_ls)+1] <- Current_DIC 
-        Current_dDIC <- Current_DIC + (2*length(explV))
-        dDIC_ls[length(dDIC_ls)+1] <- Current_dDIC
-        names(DIC_ls)[length(DIC_ls)] <- names(dDIC_ls)[length(dDIC_ls)] <- paste(explV) 
+        names(DIC_ls)[length(DIC_ls)] <- paste(explV) 
         
         # Update the best DIC if the DIC of the current model is better
-        if(Current_dDIC < Best_dDIC){
+        if(Current_DIC < Best_DIC){
           Best_DIC <- Current_DIC
-          Best_dDIC <- Current_dDIC
           Best_explV <- left_explV_ls[x]
         }
       }
@@ -793,8 +784,6 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
         Sel_explV_ls <- c(Sel_explV_ls, Best_explV)
         left_explV_ls <- setdiff(Full_explV_ls, Sel_explV_ls)
         
-        Best_DIC_ls[length(Best_DIC_ls)+1] <- Best_DIC ##**##
-        names(Best_DIC_ls)[length(Best_DIC_ls)] <- paste(unlist(Sel_explV_ls), collapse=" + ") ##**##
         # cat("\014")    
         toc(log = TRUE) # Step
         cat("DIC=", format(round(Best_DIC, 2)), "   Selected explV: ", paste(Sel_explV_ls, collapse = " , "), "\n", sep = "")
@@ -807,8 +796,8 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
       } else {
         break
       }
-      
     }
+    if(Sel_explV_ls != 1){Sel_explV_ls <- unlist(strsplit(Best_explvs, " \\+ "))}
     toc(log = TRUE) # Forward Model Selection
   }
   
@@ -823,8 +812,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
     # Get a list of Full explanatory variables and start by selecting all
     Sel_explV_ls <- Full_explV_ls <- names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID))
     # Placeholder for Selected explanatory variables and Best DIC
-    Best_DIC_ls <- list() ##**##
-    DIC_ls <- dDIC_ls <-  list() 
+    DIC_ls <-  list() 
     worst_explV_ls <- list()
     
     ### Full Model ----
@@ -838,16 +826,11 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
     ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H0, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     
     # Calculate DIC for the full model
-    Current_DIC <- ResultP$dic$dic + ResultN$dic$dic
+    Current_DIC <- if(!is.null(ResultP$dic$dic) && !is.null(ResultP$dic$dic)){ResultP$dic$dic + ResultN$dic$dic} else {Inf}
+    if(Current_DIC == Inf){ERROR_ls[length(ERROR_ls)+1] <- explV}
     Best_DIC <- Current_DIC
-    Current_dDIC <- Current_DIC + (2*length(Full_explV_ls))
-    Best_dDIC <- Current_dDIC
-    
-    Best_DIC_ls[1] <- Best_DIC ##**##
-    names(Best_DIC_ls)[1] <- paste(unlist(Full_explV_ls), collapse=" + ") ##**##
     DIC_ls[1] <- Current_DIC
-    dDIC_ls[1] <- Current_DIC + (2*length(Full_explV_ls))
-    names(DIC_ls)[1] <- names(dDIC_ls)[1] <- paste(unlist(Full_explV_ls), collapse=" + ")
+    names(DIC_ls)[1] <- paste(unlist(Full_explV_ls), collapse=" + ")
     
     toc(log = TRUE) # Full Model
     cat("DIC=", format(round(Current_DIC, 2)), "   ExplV: ", paste(Full_explV_ls, collapse = ", "), "\n", sep = "")
@@ -876,17 +859,15 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
         toc(log = TRUE) # Current Model
         
         # Calculate DIC for the current model and compare it with the best model
-        Current_DIC <- ResultP$dic$dic + ResultN$dic$dic
+        Current_DIC <- if(!is.null(ResultP$dic$dic) && !is.null(ResultN$dic$dic)){ResultP$dic$dic + ResultN$dic$dic} else {Inf}
+        if(Current_DIC == Inf){ERROR_ls[length(ERROR_ls)+1] <- explV}
         cat("DIC = ", format(round(Current_DIC, 2)), "   ExplV: ", explV, "\n", sep = "")
         DIC_ls[length(DIC_ls)+1] <- Current_DIC 
-        Current_dDIC <- Current_DIC+ if(explV!=""){2*length(unlist(strsplit(explV, "\\+")))} else {0}
-        dDIC_ls[length(dDIC_ls)+1] <- Current_dDIC
-        names(DIC_ls)[length(DIC_ls)] <- names(dDIC_ls)[length(dDIC_ls)] <- if(explV!="") {paste(explV)} else {"H0"} 
+        names(DIC_ls)[length(DIC_ls)] <- if(explV!="") {paste(explV)} else {"H0"} 
         
         # Update the best DIC if the DIC of the current model is better
-        if(Current_dDIC < Best_dDIC){
+        if(Current_DIC < Best_DIC){
           Best_DIC <- Current_DIC
-          Best_dDIC <- Current_dDIC
           Worst_explV <- Sel_explV_ls[x]
         }
       }
@@ -896,9 +877,6 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
         Sel_explV_ls <- setdiff(Sel_explV_ls, Worst_explV)
         worst_explV_ls[length(worst_explV_ls)+1] <- Worst_explV
         
-        Best_DIC_ls[length(Best_DIC_ls)+1] <-  Best_DIC ##**##
-        names(Best_DIC_ls)[length(Best_DIC_ls)] <- paste(unlist(Sel_explV_ls), collapse=" + ")
-        # cat("\014")    
         toc(log = TRUE) # Step
         cat("DIC=", format(round(Best_DIC, 2)), "   Selected explV: ", paste(Sel_explV_ls, collapse = " , "), "\n", sep = "")
         cat("Explanatory variable removed: ", paste(worst_explV_ls, collapse = ", "), "\n\n", sep = "")
@@ -911,6 +889,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
         break
       }
     }
+    if(Sel_explV_ls != 1){Sel_explV_ls <- unlist(strsplit(Best_explvs, " \\+ "))}
     toc(log = TRUE) # Backward Model Selection
   } 
   
@@ -924,7 +903,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
     left_explV_ls <- Full_explV_ls <- names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID))
     # Placeholder for Selected explanatory variables and Best DIC
     Sel_explV_ls <- list()
-    DIC_ls <- dDIC_ls <-  list() 
+    DIC_ls <- list() 
     
     ## Null Model ----
     tic("Null Model")
@@ -941,8 +920,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
     if(Current_DIC == Inf){ERROR_ls[length(ERROR_ls)+1] <- "H0"}
     Best_DIC <- Current_DIC
     DIC_ls[1] <- Current_DIC 
-    dDIC_ls[1] <- Current_DIC ##**##
-    names(DIC_ls)[1] <- names(dDIC_ls)[1] <- "H0" 
+    names(DIC_ls)[1] <- "H0" 
     
     toc(log = TRUE) # null model
     cat("DIC=", format(round(Current_DIC, 2)), "   ExplV: ", "1", "\n", sep = "")
@@ -973,8 +951,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
         if(Current_DIC == Inf){ERROR_ls[length(ERROR_ls)+1] <- explV}
         cat("DIC = ", format(round(Current_DIC, 2)), "   ExplV: ", explV, "\n", sep = "")
         DIC_ls[length(DIC_ls)+1] <- Current_DIC 
-        dDIC_ls[length(dDIC_ls)+1] <- Current_DIC + 2*length(unlist(strsplit(explV, "\\+"))) ##**##
-        names(DIC_ls)[length(DIC_ls)] <- names(dDIC_ls)[length(dDIC_ls)] <- paste(explV) 
+        names(DIC_ls)[length(DIC_ls)] <- paste(explV) 
         
         # Update the best DIC if the DIC of the current model is better
         if(Current_DIC < Best_DIC){
@@ -1014,7 +991,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
     # Get a list of Full explanatory variables and start by selecting all
     Sel_explV_ls <- Full_explV_ls <- names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID))
     # Placeholder for Selected explanatory variables and Best DIC
-    DIC_ls <- dDIC_ls <-  list() 
+    DIC_ls <- list() 
     worst_explV_ls <- list()
     
     ### Full Model ----
@@ -1032,8 +1009,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
     if(Current_DIC == Inf){ERROR_ls[length(ERROR_ls)+1] <- explV}
     Best_DIC <- Current_DIC
     DIC_ls[1] <- Current_DIC
-    dDIC_ls[1] <- Current_DIC + (2*length(Full_explV_ls)) ##**##
-    names(DIC_ls)[1] <- names(dDIC_ls)[1] <- paste(unlist(Full_explV_ls), collapse=" + ")
+    names(DIC_ls)[1] <- paste(unlist(Full_explV_ls), collapse=" + ")
     
     toc(log = TRUE) # Full Model
     cat("DIC=", format(round(Current_DIC, 2)), "   ExplV: ", paste(Full_explV_ls, collapse = ", "), "\n", sep = "")
@@ -1066,8 +1042,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
         if(Current_DIC == Inf){ERROR_ls[length(ERROR_ls)+1] <- explV}
         cat("DIC = ", format(round(Current_DIC, 2)), "   ExplV: ", explV, "\n", sep = "")
         DIC_ls[length(DIC_ls)+1] <- Current_DIC 
-        dDIC_ls[length(dDIC_ls)+1] <- Current_DIC + if(explV!=""){2*length(unlist(strsplit(explV, "\\+")))} else {0}
-        names(DIC_ls)[length(DIC_ls)] <- names(dDIC_ls)[length(dDIC_ls)] <- if(explV!="") {paste(explV)} else {"H0"} 
+        names(DIC_ls)[length(DIC_ls)] <- if(explV!="") {paste(explV)} else {"H0"} 
         
         # Update the best DIC if the DIC of the current model is better
         if(Current_DIC < Best_DIC){
@@ -1148,8 +1123,10 @@ Combine_Predictions <- function(ClearType = 1, Prediction_DIR = "output/predicti
   st_geometry(Layer_comb) <- "geometry"
   
   if (WRITE_SHP) {
-    SHP_Filename <- file.path(Prediction_DIR, paste0("Pred_", CT, ".shp"))
-    st_write(Layer_comb, SHP_Filename, delete_layer = TRUE)
+    LAYER_NAME <- paste0("Pred_", CT)
+    GDB_PATH <- file.path(Prediction_DIR, "Predictions.gdb")
+    st_write(obj = Layer_comb, dsn = GDB_PATH, layer = LAYER_NAME,  
+             driver = "OpenFileGDB", delete_layer = TRUE)
   }
   if (WRITE_DATA) {
     DATA_Filename <- file.path(Prediction_DIR, paste0("Pred_", CT, ".qs"))
