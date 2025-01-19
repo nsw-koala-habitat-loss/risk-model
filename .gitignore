@@ -44,3 +44,4 @@ output/
 
 # PyCharm configuration files
 .idea/
+.Rproj.user
