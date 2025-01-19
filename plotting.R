@@ -19,198 +19,10 @@ source("functions.R")
 
 # Prepare data ----
 
-# Example usage for '_Ag', '_Fo', and '_In'
+## Extract long format dataframe of covariate selection results
 Cov_ls_Ag_long <- Get_cov_coeff_long(1)
 Cov_ls_In_long <- Get_cov_coeff_long(2)
 Cov_ls_Fo_long <- Get_cov_coeff_long(3)
-
-
-## Agriculture ----
-# 
-# SUs_Ag <- qread("output/spatial_units/sus_ag.qs")
-# SA1s <- qread("output/spatial_units/sa1s.qs")
-# ZStats_Woody_Ag <- qread("output/data/ZStats_Woody_Ag.qs")
-# ZStats_Covs_Ag <- qread("output/data/ZStats_Covs_Ag.qs")
-# KMRs <- names(ZStats_Covs_Ag)
-# kmr <- KMRs[1]
-# Model_Ag <- fit_model2(KMR = kmr, ClearType = 1, SpatUnits = SUs_Ag, RespData = ZStats_Woody_Ag, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
-# Cov_ls <- summary(Model_Ag$PModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>% dplyr::select(Covariate) %>% arrange(Covariate)
-# 
-# Cov_ls_Ag_long <- data.frame()
-# for (kmr in KMRs){
-#   
-#   # read model selection results
-#   MODEL <- qread(paste0("output/models/Model_", kmr, "_Ag.qs"))
-# 
-#   # Get Covariates and coefficients
-#   Cov <- summary(MODEL$PModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>% dplyr::select(Covariate) %>% unlist()
-#   
-#   # Separate the coefficient into positive or negative
-#   Cof_PModel <- summary(MODEL$PModel)$fixed[,1]
-#   Cof_PModel <- if_else(Cof_PModel>0, 1, -1)
-#   Cof_NModel <- summary(MODEL$NModel)$fixed[,1]
-#   Cof_NModel <- if_else(Cof_NModel>0, 1, -1)
-#   
-#   # Combine Covariate and coefficients
-#   Cov_cof <- as.data.frame(cbind(Cov, Cof_PModel, Cof_NModel))
-#   rownames(Cov_cof) <- NULL
-#   Cov_ls_Ag <- left_join(Cov_ls, Cov_cof, by  = join_by("Covariate" == "Cov")) %>%  mutate(kmr = kmr)
-#   Cov_ls_Ag_long <- rbind(Cov_ls_Ag_long, Cov_ls_Ag)
-# }
-# 
-# # Change all NA to 0
-# Cov_ls_Ag_long <- Cov_ls_Ag_long %>% 
-#   mutate(Cof_PModel_Ag = ifelse(is.na(Cof_PModel), 0, Cof_PModel),
-#          Cof_NModel_Ag = ifelse(is.na(Cof_NModel), 0, Cof_NModel))
-# 
-# # Split Pmodel and Nmodel into 2 dataframes
-# Cov_ls_Ag_long_PMod <- Cov_ls_Ag_long %>%
-#   dplyr::select(Covariate, Cof_PModel, kmr) %>% 
-#   dplyr::mutate(Cof_PModel = ifelse(is.na(Cof_PModel), 0, Cof_PModel))
-# 
-# Cov_ls_Ag_long_NMod <- Cov_ls_Ag_long %>%
-#   dplyr::select(Covariate, Cof_NModel, kmr) %>% 
-#   
-#   # duplicate the each rows 3 times and assign x and y coordinates for plotting triangles 
-#   uncount(weight = 3) %>% 
-#   mutate(x = as.numeric(as.factor(kmr)),
-#          x_c = rep(c(-0.5, 0.5, 0.5), length(unique(Covariate))*length(unique(kmr))),
-#          y = as.numeric(as.factor(Covariate)),
-#          y_c = rep(c(-0.5, -0.5, 0.5), length(unique(Covariate))*length(unique(kmr))),
-#          x1 = x + x_c, y1 = y + y_c,
-#          Cof_NModel = ifelse(is.na(Cof_NModel), 0, Cof_NModel))
-# 
-# # diverge_hcl(5, palette = "Blue_Red3")[4:5] 
-# # diverge_hcl(5, palette = "Red_Green")[4:5]
-# # diverge_hcl(5, palette = "Purple_Brown")[4:5]
-# # Test plot
-# # ggplot() +
-# #   geom_tile(data = Cov_ls_Ag_long_PMod, aes(x = kmr, y = Covariate, fill = Cof_PModel))+
-# #   # geom_polygon(aes(x=c(0.5,1.5,1.5), y=c(0.5,0.5,1.5)))
-# #   geom_polygon(data = Cov_ls_Ag_long_NMod, aes(x = x1, y = y1, group = interaction(Covariate, kmr), fill = Cof_NModel), color = "grey80")+
-# #   scale_fill_manual(values = c(diverge_hcl(5, palette = "Blue_Red3")[4:5], "grey80") ,
-# #                     breaks = c(-1, 1, 0),
-# #                     labels = c("negative", "positive", "Not Selected"))
-# 
-# 
-# ## Forestry ----
-# SUs_Fo <- qread("output/spatial_units/sus_Fo.qs")
-# SA1s <- qread("output/spatial_units/sa1s.qs")
-# ZStats_Woody_Fo <- qread("output/data/ZStats_Woody_Fo.qs")
-# ZStats_Covs_Fo <- qread("output/data/ZStats_Covs_Fo.qs")
-# KMRs <- names(ZStats_Covs_Fo)
-# kmr <- KMRs[1]
-# Model_Fo <- fit_model2(KMR = kmr, ClearType = 3, SpatUnits = SUs_Fo, RespData = ZStats_Woody_Fo, CovsCD = ZStats_Covs_Fo, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
-# Cov_ls <- summary(Model_Fo$PModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>% dplyr::select(Covariate) %>% arrange(Covariate)
-# # kmr="CC"
-# 
-# Cov_ls_Fo_long <- data.frame()
-# 
-# for (kmr in KMRs){
-#   
-#   # read model selection results
-#   SelModel_BC <- qread(paste0("output/models/SelModel_", kmr, "_Fo_BC.qs"))
-#   SelModel_FC <- qread(paste0("output/models/SelModel_", kmr, "_Fo_FC.qs"))
-#   
-#   # Get Covariates based on DIC
-#   MinDIC_BC <- SelModel_BC$DIC_ls[which.min(unlist(SelModel_BC$DIC_ls))]
-#   MinDIC_FC <- SelModel_FC$DIC_ls[which.min(unlist(SelModel_FC$DIC_ls))]
-#   MinDIC_BC_DIC <- unlist(MinDIC_BC)
-#   MinDIC_FC_DIC <- unlist(MinDIC_FC)
-#   
-#   # Assign best model based on DIC
-#   if(MinDIC_BC_DIC < MinDIC_FC_DIC){
-#     Best_Mod <- SelModel_BC} else{
-#       Best_Mod <- SelModel_FC}
-#   cat("Best Model for  ", kmr, ": ", if_else(MinDIC_BC_dDIC < MinDIC_FC_dDIC, "BC", "FC"), "\n")
-#   
-#   # Get Covariates and coefficients
-#   Cov <- summary(Best_Mod$PModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>% dplyr::select(Covariate) %>% unlist()
-#   
-#   # Separate the coefficient into positive or negative
-#   Cof_PModel <- summary(Best_Mod$PModel)$fixed[,1]
-#   Cof_PModel <- if_else(Cof_PModel>0, 1, -1)
-#   Cof_NModel <- summary(Best_Mod$NModel)$fixed[,1]
-#   Cof_NModel <- if_else(Cof_NModel>0, 1, -1)
-#   
-#   # Combine Covariate and coefficients
-#   Cov_cof <- as.data.frame(cbind(Cov, Cof_PModel, Cof_NModel))
-#   rownames(Cov_cof) <- NULL
-#   Cov_ls_Fo <- left_join(Cov_ls, Cov_cof, by  = join_by("Covariate" == "Cov")) %>%  mutate(kmr = kmr)
-#   Cov_ls_Fo_long <- rbind(Cov_ls_Fo_long, Cov_ls_Fo)
-# }
-# 
-# # Change all NA to 0
-# Cov_ls_Fo_long <- Cov_ls_Fo_long %>% 
-#   mutate(Cof_PModel_Fo = ifelse(is.na(Cof_PModel), 0, Cof_PModel),
-#          Cof_NModel_Fo = ifelse(is.na(Cof_NModel), 0, Cof_NModel))
-# 
-# # Cov_ls_Fo_long_PMod <- Cov_ls_Fo_long %>%
-# #   dplyr::select(Covariate, Cof_PModel, kmr) %>% 
-# #   dplyr::mutate(Cof_PModel = ifelse(is.na(Cof_PModel), 0, Cof_PModel))
-# # 
-# # Cov_ls_Fo_long_NMod <- Cov_ls_Fo_long %>%
-# #   dplyr::select(Covariate, Cof_NModel, kmr) %>% 
-# #   uncount(weight = 3) %>% 
-# #   mutate(x = as.numeric(as.factor(kmr)),
-# #          x_c = rep(c(-0.5, 0.5, 0.5), length(unique(Covariate))*length(unique(kmr))),
-# #          y = as.numeric(as.factor(Covariate)),
-# #          y_c = rep(c(-0.5, -0.5, 0.5), length(unique(Covariate))*length(unique(kmr))),
-# #          x1 = x + x_c, y1 = y + y_c,
-# #          Cof_NModel = ifelse(is.na(Cof_NModel), 0, Cof_NModel))
-# 
-# ## Infrastructure ----
-# SUs_In <- qread("output/spatial_units/sus_In.qs")
-# SA1s <- qread("output/spatial_units/sa1s.qs")
-# ZStats_Woody_In <- qread("output/data/ZStats_Woody_In.qs")
-# ZStats_Covs_In <- qread("output/data/ZStats_Covs_In.qs")
-# KMRs <- names(ZStats_Covs_In)
-# kmr <- KMRs[1]
-# Model_In <- fit_model2(KMR = kmr, ClearType = 2, SpatUnits = SUs_In, RespData = ZStats_Woody_In, CovsCD = ZStats_Covs_In, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
-# Cov_ls <- summary(Model_In$PModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>% dplyr::select(Covariate) %>% arrange(Covariate)
-# # kmr="CC"
-# 
-# Cov_ls_In_long <- data.frame()
-# 
-# for (kmr in KMRs){
-#   
-#   # read model selection results
-#   SelModel_BC <- qread(paste0("output/models/SelModel_", kmr, "_In_BC.qs"))
-#   SelModel_FC <- qread(paste0("output/models/SelModel_", kmr, "_In_FC.qs"))
-#   
-#   # Get Covariates based on DIC
-#   MinDIC_BC <- SelModel_BC$DIC_ls[which.min(unlist(SelModel_BC$DIC_ls))]
-#   MinDIC_FC <- SelModel_FC$DIC_ls[which.min(unlist(SelModel_FC$DIC_ls))]
-#   MinDIC_BC_DIC <- unlist(MinDIC_BC)
-#   MinDIC_FC_DIC <- unlist(MinDIC_FC)
-#   
-#   # Assign best model based on DIC
-#   if(MinDIC_BC_DIC < MinDIC_FC_DIC){
-#     Best_Mod <- SelModel_BC} else{
-#       Best_Mod <- SelModel_FC}
-#   cat("Best Model for  ", kmr, ": ", if_else(MinDIC_BC_dDIC < MinDIC_FC_dDIC, "BC", "FC"), "\n")
-#   
-#   # Get Covariates and coefficients
-#   Cov <- summary(Best_Mod$PModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>% dplyr::select(Covariate) %>% unlist()
-#   
-#   # Separate the coefficient into positive or negative
-#   Cof_PModel <- summary(Best_Mod$PModel)$fixed[,1]
-#   Cof_PModel <- if_else(Cof_PModel>0, 1, -1)
-#   Cof_NModel <- summary(Best_Mod$NModel)$fixed[,1]
-#   Cof_NModel <- if_else(Cof_NModel>0, 1, -1)
-#   
-#   # Combine Covariate and coefficients
-#   Cov_cof <- as.data.frame(cbind(Cov, Cof_PModel, Cof_NModel))
-#   rownames(Cov_cof) <- NULL
-#   Cov_ls_In <- left_join(Cov_ls, Cov_cof, by  = join_by("Covariate" == "Cov")) %>%  mutate(kmr = kmr)
-#   Cov_ls_In_long <- rbind(Cov_ls_In_long, Cov_ls_In)
-# }
-# 
-# # Change all NA to 0
-# Cov_ls_In_long <- Cov_ls_In_long %>% 
-#   mutate(Cof_PModel_In = ifelse(is.na(Cof_PModel), 0, Cof_PModel),
-#          Cof_NModel_In = ifelse(is.na(Cof_NModel), 0, Cof_NModel))
-
 
 # Combine results from all clearing types ----
 Cov_df <- full_join(Cov_ls_Ag_long, Cov_ls_Fo_long, by = c("Covariate", "kmr")) %>% 
@@ -741,9 +553,8 @@ Bar_plot
 TileBar_plot_In <- Tile_plot + Bar_plot + plot_layout(width = c(5,3.5))
 ggsave("output/figures/TileBar_plot_In.png", TileBar_plot_In, width = 11, height = 8, dpi = 300, bg = "white")
 
-
-# Map for study area (KMR) ----
-
+# Plot map----
+## Map for study area (KMR) ----
 # Load spatial units for defining the study area 
 SUs_Ag <- qread("output/spatial_units/SUs_Ag.qs")
 
@@ -779,7 +590,6 @@ NSW_urb_sel_pt <- ABS_urb %>%
   st_centroid(.) %>% 
   mutate(x = st_coordinates(.)[,1], y = st_coordinates(.)[,2])
 
-## Plot map----
 KMR_map <- ggplot()+
   # State boundary grey background
   geom_sf(data = STE, fill = "grey80", color = "white", lwd = 0.2)+
@@ -809,53 +619,7 @@ KMR_map <- ggplot()+
 # Export KMR map
 ggsave("output/figures/KMR_map.png", KMR_map, width = 11, height = 11, dpi = 300)
 
-
-# Deforestation Risk map ----
-
-SUs_Ag <- qread("output/spatial_units/SUs_Ag.qs")
-
-Pred_Ag <- qread("output/predictions/Pred_Ag.qs")
-Pred_Fo <- qread("output/predictions/Pred_Fo.qs")
-Pred_In <- qread("output/predictions/Pred_In.qs")
-
-### Extract numbers for results ----
-Pred_Ag_all_result <- Pred_Ag %>% mutate(Area = as.numeric(st_area(.)/1e4),
-                                         RemWoodyHa = if_else( (Woody - Wdy_Clr) >0 , Woody - Wdy_Clr , 0) * 0.0625)
-Pred_Fo %>% st_drop_geometry() %>% filter(is.na(PredAll))
-sum(Pred_Ag_all_result$RemWoodyHa[Pred_Ag_all_result$PredAll > 0.5], na.rm = TRUE)
-nrow(Pred_Ag_all_result[Pred_Ag_all_result$PredAll > 0.5,])
-
-sum(Pred_Ag_all_result$RemWoodyHa[Pred_Ag_all_result$PredAll > 0.25], na.rm = TRUE)
-nrow(Pred_Ag_all_result[Pred_Ag_all_result$PredAll > 0.25,])
-
-sum(Pred_Ag_all_result$RemWoodyHa[Pred_Ag_all_result$PredAll > 0.1], na.rm = TRUE)
-nrow(Pred_Ag_all_result[Pred_Ag_all_result$PredAll > 0.1,])
-
-Pred_Fo_all_result <- do.call(rbind, Pred_Fo) %>% 
-  mutate(Area = as.numeric(st_area(.)/1e4),
-         RemWoodyHa = if_else(NT-R>0, NT-R, 0) * 0.0625)
-sum(Pred_Fo_all_result$RemWoodyHa[Pred_Fo_all_result$PredAll > 0.5], na.rm = TRUE)
-nrow(Pred_Fo_all_result[Pred_Fo_all_result$PredAll > 0.5,])
-
-sum(Pred_Fo_all_result$RemWoodyHa[Pred_Fo_all_result$PredAll > 0.25], na.rm = TRUE)
-nrow(Pred_Fo_all_result[Pred_Fo_all_result$PredAll > 0.25,])
-
-sum(Pred_Fo_all_result$RemWoodyHa[Pred_Fo_all_result$PredAll > 0.1], na.rm = TRUE)
-nrow(Pred_Fo_all_result[Pred_Fo_all_result$PredAll > 0.1,])
-
-Pred_In_all_result <- do.call(rbind, Pred_In) %>% 
-  mutate(Area = as.numeric(st_area(.)/1e4),
-         RemWoodyHa = if_else(NT-R>0, NT-R, 0) * 0.0625)
-sum(Pred_In_all_result$RemWoodyHa[Pred_In_all_result$PredAll > 0.5], na.rm = TRUE)
-nrow(Pred_In_all_result[Pred_In_all_result$PredAll > 0.5,])
-
-sum(Pred_In_all_result$RemWoodyHa[Pred_In_all_result$PredAll > 0.25], na.rm = TRUE)
-nrow(Pred_In_all_result[Pred_In_all_result$PredAll > 0.25,])
-
-sum(Pred_In_all_result$RemWoodyHa[Pred_In_all_result$PredAll > 0.1], na.rm = TRUE)
-nrow(Pred_In_all_result[Pred_In_all_result$PredAll > 0.1,])
-
-## Plot maps----
+## Deforestation risk maps----
 ### load base layers and target data  layers
 #### Data Layers
 Pred_Ag <- qread("output/predictions/Pred_Ag.qs")
@@ -874,14 +638,14 @@ STE <- st_read("D:/Data/NSW_Deforestation/risk-model-covariates/Input/2016_STE_s
 
 NSW_urb_sel_pt <- ABS_urb %>%
   filter(UCL_NAME16 %in% c("Lismore", "Port Macquarie",
-                         "Sydney",
-                         "Nowra - Bomaderry", "Bega",
-                         "Armidale", "Tamworth",
-                         "Narrabri", "Dubbo",
-                         "Orange", "Wagga Wagga",
-                         "Griffith", "Deniliquin",
-                         "Brewarrina (L)", 
-                         "Broken Hill", "Ivanhoe (L)", "Cobar")) %>% 
+                           "Sydney",
+                           "Nowra - Bomaderry", "Bega",
+                           "Armidale", "Tamworth",
+                           "Narrabri", "Dubbo",
+                           "Orange", "Wagga Wagga",
+                           "Griffith", "Deniliquin",
+                           "Brewarrina (L)", 
+                           "Broken Hill", "Ivanhoe (L)", "Cobar")) %>% 
   dplyr::select(UCL_NAME16, geometry) %>% 
   distinct(UCL_NAME16, .keep_all = TRUE) %>% 
   st_centroid(.) %>%
@@ -897,161 +661,8 @@ PLOTMAP_risk_NSW(DATA = Pred_Fo, FILL = PredAll, LEGEND_Title = "Deforestation\n
 PLOTMAP_risk_NSW(DATA = Pred_In, FILL = PredAll, LEGEND_Title = "Deforestation\nrisk", ClearType = 3, FilenamePath_PNG = "output/figures/Pred_In_map1.png")
 
 
-
-# Pred_Ag_all <- Pred_Ag
-# 
-# # ggplot()+
-# #   geom_point(data = NSW_urb2_pt, aes(x = x, y = y, color = "red3", size = 1))+
-# #   geom_text(data = NSW_urb2_pt, aes(x = x, y = y, label = UCL_NAME16), size = 4)+
-# #   geom_sf(data = KMR_shp, fill = NA, color = "black", lwd = 0.1)
-# # 
-# # st_bbox(KMR_shp)[c(1,3)]
-# 
-# Pred_Ag_map <- ggplot()+
-#   
-#   geom_sf(data = STE, fill = "grey80", color = "white", lwd = 0.2)+
-#   
-#   geom_sf(data = Pred_Ag_all, aes(fill = PredAll), color = NA)+
-#   geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.2)+
-#   scale_fill_gradientn(colours = hcl.colors(8, palette = "Blues 3" ,rev = TRUE), name = expression("Deforestation\nrisk"))+
-#   
-#   # start a new scale
-#   new_scale_colour() +
-#   
-#   geom_sf(data = NSW_urb_sel_pt, colour = "red3", size = 1)+
-#   geom_text_repel(data = NSW_urb_sel_pt, aes(x = x, y = y , label = UCL_NAME16), 
-#                   fontface = "bold", nudge_y = -5, size = 3,
-#                   color = "black",     # text color
-#                   bg.color = "grey90", # shadow color
-#                   bg.r = 0.05)+          # shadow radius
-#   
-#   ggspatial::annotation_scale(location = "br", pad_y = unit(1, "cm"))+
-#   ggspatial::annotation_north_arrow(location = "br", which_north = "true", pad_y = unit(2, "cm"))+
-#   
-#   theme(axis.ticks.x = element_blank(),axis.text.x = element_blank(), axis.line.x = element_blank())+
-#   theme(axis.ticks.y = element_blank(),axis.text.y = element_blank(), axis.line.y = element_blank())+
-#   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
-#   theme(legend.position = c(0.9, 0.3))+
-#   theme(axis.title.x = element_blank(), axis.title.y = element_blank())+
-#   coord_sf(xlim = st_bbox(KMR_shp)[c(1,3)], ylim = st_bbox(KMR_shp)[c(2,4)], expand = TRUE)
-# ggsave("output/figures/Pred_Ag_map1.png", Pred_Ag_map, width = 11, height = 11, dpi = 300, bg = "white")
-# 
-# 
-# # Pred_Fo_all <- do.call(rbind, Pred_Fo)
-# Pred_Fo_all <- Pred_Fo
-# Pred_Fo_map <- ggplot()+
-#   
-#   geom_sf(data = STE, fill = "grey80", color = "white", lwd = 0.2)+
-#   
-#   geom_sf(data = Pred_Fo_all, aes(fill = PredAll), color = NA)+
-#   geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.2)+
-#   scale_fill_gradientn(colours = hcl.colors(8, palette = "Blues 3" ,rev = TRUE), name = expression("Deforestation\nrisk"))+
-#   
-#   # start a new scale
-#   new_scale_colour() +
-#   
-#   geom_sf(data = NSW_urb_sel_pt, colour = "red3", size = 1)+
-#   geom_text_repel(data = NSW_urb_sel_pt, aes(x = x, y = y , label = UCL_NAME16), 
-#                   fontface = "bold", nudge_y = -5, size = 3,
-#                   color = "black",     # text color
-#                   bg.color = "grey90", # shadow color
-#                   bg.r = 0.05)+          # shadow radius
-#   
-#   ggspatial::annotation_scale(location = "br", pad_y = unit(1, "cm"))+
-#   ggspatial::annotation_north_arrow(location = "br", which_north = "true", pad_y = unit(2, "cm"))+
-#   
-#   theme(axis.ticks.x = element_blank(),axis.text.x = element_blank(), axis.line.x = element_blank())+
-#   theme(axis.ticks.y = element_blank(),axis.text.y = element_blank(), axis.line.y = element_blank())+
-#   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
-#   theme(legend.position = c(0.9, 0.3))+
-#   theme(axis.title.x = element_blank(), axis.title.y = element_blank())+
-#   coord_sf(xlim = st_bbox(KMR_shp)[c(1,3)], ylim = st_bbox(KMR_shp)[c(2,4)], expand = TRUE)
-# ggsave("output/figures/Pred_Fo_map2.png", Pred_Fo_map, width = 11, height = 11, dpi = 300, bg = "white")
-# 
-# 
-# 
-# # Pred_In_all <- do.call(rbind, Pred_In)
-# Pred_In_all <- Pred_In
-# Pred_In_map <- ggplot() +
-#   
-#   geom_sf(data = STE, fill = "grey80", color = "white", lwd = 0.2)+
-#   
-#   geom_sf(data = Pred_In_all, aes(fill = PredAll), color = NA)+
-#   geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.2)+
-#   scale_fill_gradientn(colours = hcl.colors(8, palette = "Blues 3" ,rev = TRUE), name = expression("Deforestation\nrisk"))+
-#   
-#   # start a new scale
-#   new_scale_colour() +
-#   
-#   geom_sf(data = NSW_urb_sel_pt, colour = "red3", size = 1)+
-#   geom_text_repel(data = NSW_urb_sel_pt, aes(x = x, y = y , label = UCL_NAME16), 
-#                   fontface = "bold", nudge_y = -5, size = 3,
-#                   color = "black",     # text color
-#                   bg.color = "grey90", # shadow color
-#                   bg.r = 0.05)+          # shadow radius
-#   
-#   ggspatial::annotation_scale(location = "br", pad_y = unit(1, "cm"))+
-#   ggspatial::annotation_north_arrow(location = "br", which_north = "true", pad_y = unit(2, "cm"))+
-#   
-#   theme(axis.ticks.x = element_blank(),axis.text.x = element_blank(), axis.line.x = element_blank())+
-#   theme(axis.ticks.y = element_blank(),axis.text.y = element_blank(), axis.line.y = element_blank())+
-#   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
-#   theme(legend.position = c(0.9, 0.3))+
-#   theme(axis.title.x = element_blank(), axis.title.y = element_blank())+
-#   coord_sf(xlim = st_bbox(KMR_shp)[c(1,3)], ylim = st_bbox(KMR_shp)[c(2,4)], expand = TRUE)
-# ggsave("output/figures/Pred_In_map2.png", Pred_In_map, width = 11, height = 11, dpi = 300, bg = "white")
-# 
-
-# Koala Habitat loss risk----
-
-# SUs_Ag <- qread("output/spatial_units/SUs_Ag.qs")
-# 
-# Khab_risk_Ag <- qread("output/predictions/Khab_risk_Ag.qs")
-# Khab_risk_Fo <- qread("output/predictions/Khab_risk_Fo.qs")
-# Khab_risk_In <- qread("output/predictions/Khab_risk_In.qs")
-# 
-# KMR_shp <- st_read("input/spatial_units/biodiversity_nsw_koala_modelling_regions_v1p1/NSW_Koala_Modelling_Regions_v1.1.shp")
-# 
-# ABS_urb <- st_read("D:/Data/NSW_Deforestation/risk-model-covariates/Input/2016_UCL_shape/UCL_2016_AUST.shp") %>% 
-#   st_transform(st_crs(SUs_Ag$CC))
-# 
-# STE <- st_read("D:/Data/NSW_Deforestation/risk-model-covariates/Input/2016_STE_shape/STE_2016_AUST.shp") %>% 
-#   st_transform(st_crs(SUs_Ag$CC)) %>% 
-#   st_crop(KMR_shp)
-# 
-# NSW_urb <- st_intersection(ABS_urb, KMR_shp) 
-# NSW_urb2 <- NSW_urb %>%
-#   filter(!str_detect(UCL_NAME16, "emain")) %>% 
-#   group_by(KMRname) %>%
-#   top_n(10, AREASQKM16)
-# NSW_urb2_pt <- st_centroid(NSW_urb2)
-# NSW_urb2_pt$x <- st_coordinates(NSW_urb2_pt)[,1]
-# NSW_urb2_pt$y <- st_coordinates(NSW_urb2_pt)[,2]
-# 
-# NSW_urb_sel <- NSW_urb %>%
-#   filter(UCL_NAME16 %in% c("Lismore", "Port Macquarie",
-#                            "Sydney",
-#                            "Nowra - Bomaderry", "Bega",
-#                            "Armidale", "Tamworth",
-#                            "Narrabri", "Dubbo",
-#                            "Orange", "Wagga Wagga",
-#                            "Griffith", "Deniliquin",
-#                            "Brewarrina (L)", 
-#                            "Broken Hill", "Ivanhoe (L)", "Cobar")) %>% 
-#   dplyr::select(UCL_NAME16, geometry) %>% 
-#   distinct(UCL_NAME16, .keep_all = TRUE)
-# 
-# NSW_urb_sel_pt <- st_centroid(NSW_urb_sel)
-# NSW_urb_sel_pt$x <- st_coordinates(NSW_urb_sel_pt)[,1]
-# NSW_urb_sel_pt$y <- st_coordinates(NSW_urb_sel_pt)[,2]
-# 
-# NSW_urb_pt <- st_centroid(NSW_urb) %>% 
-#   mutate(x = st_coordinates(.)[,1], y = st_coordinates(.)[,2]) %>% 
-#   filter(!str_detect(UCL_NAME16, "emain"))
-# 
-
-## Plot maps----
-### load base layers and target data  layers
+## Koala habitat deforestation risk maps----
+### load base layers and target data layers
 #### Data Layers
 Khab_risk_Ag <- qread("output/predictions/Khab_risk_Ag.qs")
 Khab_risk_Fo <- qread("output/predictions/Khab_risk_Fo.qs")
@@ -1106,19 +717,60 @@ FilenamePath_PNG_In <- "output/figures/Khab_risk_In_map1.png"
 
 
 Ag_risk_with_Insets<- PLOTMAP_risk_with_Insets(DATA = Khab_risk_Ag, FILL = KhabRisk , LEGEND_Title = "Koala habitat\nloss risk", ClearType = 1, 
-                         Inset_BL = Inset_BL_Ag, Inset_dim = 100000, URB_PT_Main =NULL, URB_PT_SUB1 = "Coonamble", URB_PT_SUB2 = c("Collarenebri (L)", "Wee Waa"),  URB_PT_SUB3 = "Mungindi (NSW Part)", 
-                         FilenamePath_PNG = FilenamePath_PNG_Ag, PNG_width = 11, PNG_height = 11, PNG_dpi = 300)
+                                               Inset_BL = Inset_BL_Ag, Inset_dim = 100000, URB_PT_Main =NULL, URB_PT_SUB1 = "Coonamble", URB_PT_SUB2 = c("Collarenebri (L)", "Wee Waa"),  URB_PT_SUB3 = "Mungindi (NSW Part)", 
+                                               FilenamePath_PNG = FilenamePath_PNG_Ag, PNG_width = 11, PNG_height = 11, PNG_dpi = 300)
 
 In_risk_with_Insets<- PLOTMAP_risk_with_Insets(DATA = Khab_risk_In, FILL = KhabRisk , LEGEND_Title = "Koala habitat\nloss risk", ClearType = 2,
-                         Inset_BL = Inset_BL_In, Inset_dim = 100000, URB_PT_Main =NULL, 
-                         URB_PT_SUB1 = c("Blue Mountains", "Sydney", "Galston", "The Oaks"), URB_PT_SUB2 = c("Singleton", "Newcastle", "Jilliby"),  URB_PT_SUB3 =  c("Port Macquarie", "Taree", "Forster - Tuncurry"),
-                         FilenamePath_PNG = FilenamePath_PNG_In, PNG_width = 11, PNG_height = 11, PNG_dpi = 300)
+                                               Inset_BL = Inset_BL_In, Inset_dim = 100000, URB_PT_Main =NULL, 
+                                               URB_PT_SUB1 = c("Blue Mountains", "Sydney", "Galston", "The Oaks"), URB_PT_SUB2 = c("Singleton", "Newcastle", "Jilliby"),  URB_PT_SUB3 =  c("Port Macquarie", "Taree", "Forster - Tuncurry"),
+                                               FilenamePath_PNG = FilenamePath_PNG_In, PNG_width = 11, PNG_height = 11, PNG_dpi = 300)
 
 Fo_risk_with_Insets <- PLOTMAP_risk_with_Insets(DATA = Khab_risk_Fo, FILL = KhabRisk , LEGEND_Title = "Koala habitat\nloss risk", ClearType = 3,
-                         Inset_BL = Inset_BL_Fo, Inset_dim = 100000, URB_PT_Main =NULL, URB_PT_SUB1 = c("Lismore", "Bonalbo"), URB_PT_SUB2 = "Oberon",  URB_PT_SUB3 =  c("Holbrook", "Tumbarumba"),
-                         FilenamePath_PNG = FilenamePath_PNG_Fo, PNG_width = 11, PNG_height = 11, PNG_dpi = 300)
+                                                Inset_BL = Inset_BL_Fo, Inset_dim = 100000, URB_PT_Main =NULL, URB_PT_SUB1 = c("Lismore", "Bonalbo"), URB_PT_SUB2 = "Oberon",  URB_PT_SUB3 =  c("Holbrook", "Tumbarumba"),
+                                                FilenamePath_PNG = FilenamePath_PNG_Fo, PNG_width = 11, PNG_height = 11, PNG_dpi = 300)
 
-### Extract numbers for results ----
+
+# Extract numbers for reporting results ----
+## Deforestation risk ----
+
+
+Pred_Ag_all_result <- Pred_Ag %>% mutate(Area = as.numeric(st_area(.)/1e4),
+                                         RemWoodyHa = if_else( (Woody - Wdy_Clr) >0 , Woody - Wdy_Clr , 0) * 0.0625)
+Pred_Fo %>% st_drop_geometry() %>% filter(is.na(PredAll))
+sum(Pred_Ag_all_result$RemWoodyHa[Pred_Ag_all_result$PredAll > 0.5], na.rm = TRUE)
+nrow(Pred_Ag_all_result[Pred_Ag_all_result$PredAll > 0.5,])
+
+sum(Pred_Ag_all_result$RemWoodyHa[Pred_Ag_all_result$PredAll > 0.25], na.rm = TRUE)
+nrow(Pred_Ag_all_result[Pred_Ag_all_result$PredAll > 0.25,])
+
+sum(Pred_Ag_all_result$RemWoodyHa[Pred_Ag_all_result$PredAll > 0.1], na.rm = TRUE)
+nrow(Pred_Ag_all_result[Pred_Ag_all_result$PredAll > 0.1,])
+
+Pred_Fo_all_result <- do.call(rbind, Pred_Fo) %>% 
+  mutate(Area = as.numeric(st_area(.)/1e4),
+         RemWoodyHa = if_else(NT-R>0, NT-R, 0) * 0.0625)
+sum(Pred_Fo_all_result$RemWoodyHa[Pred_Fo_all_result$PredAll > 0.5], na.rm = TRUE)
+nrow(Pred_Fo_all_result[Pred_Fo_all_result$PredAll > 0.5,])
+
+sum(Pred_Fo_all_result$RemWoodyHa[Pred_Fo_all_result$PredAll > 0.25], na.rm = TRUE)
+nrow(Pred_Fo_all_result[Pred_Fo_all_result$PredAll > 0.25,])
+
+sum(Pred_Fo_all_result$RemWoodyHa[Pred_Fo_all_result$PredAll > 0.1], na.rm = TRUE)
+nrow(Pred_Fo_all_result[Pred_Fo_all_result$PredAll > 0.1,])
+
+Pred_In_all_result <- do.call(rbind, Pred_In) %>% 
+  mutate(Area = as.numeric(st_area(.)/1e4),
+         RemWoodyHa = if_else(NT-R>0, NT-R, 0) * 0.0625)
+sum(Pred_In_all_result$RemWoodyHa[Pred_In_all_result$PredAll > 0.5], na.rm = TRUE)
+nrow(Pred_In_all_result[Pred_In_all_result$PredAll > 0.5,])
+
+sum(Pred_In_all_result$RemWoodyHa[Pred_In_all_result$PredAll > 0.25], na.rm = TRUE)
+nrow(Pred_In_all_result[Pred_In_all_result$PredAll > 0.25,])
+
+sum(Pred_In_all_result$RemWoodyHa[Pred_In_all_result$PredAll > 0.1], na.rm = TRUE)
+nrow(Pred_In_all_result[Pred_In_all_result$PredAll > 0.1,])
+
+## High-quality koala habitat clearing risk ----
 Khab_risk_Ag <- qread("output/predictions/Khab_risk_Ag.qs")
 Khab_risk_Fo <- qread("output/predictions/Khab_risk_Fo.qs")
 Khab_risk_In <- qread("output/predictions/Khab_risk_In.qs")
@@ -1158,3 +810,4 @@ nrow(Khab_risk_In_all_result[Khab_risk_In_all_result$KhabRisk > 0.25,])
 
 sum(Khab_risk_In_all_result$KhabHa[Khab_risk_In_all_result$KhabRisk > 0.1], na.rm = TRUE)
 nrow(Khab_risk_In_all_result[Khab_risk_In_all_result$KhabRisk > 0.1,])
+
