@@ -22,12 +22,15 @@ library(ltm)
 # load functions
 source("functions.R")
 
+# file directories
+OUTPUT_DIR <- "D:/Data/NSW_Deforestation/risk-model/output/"
+
 # load Pre-processed data----
-ZStats_Woody <- qread("output/data/ZStats_Woody.qs")
-ZStats_CovsC <- qread("output/data/ZStats_CovsC.qs")
-ZStats_CovsD <- qread("output/data/ZStats_CovsD.qs")
-SUs <- qread("output/spatial_units/sus.qs")
-SA1s <- qread("output/spatial_units/sa1s.qs")
+ZStats_Woody <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody.qs"))
+ZStats_CovsC <- qread(file.path(OUTPUT_DIR, "data/ZStats_CovsC.qs"))
+ZStats_CovsD <- qread(file.path(OUTPUT_DIR, "data/ZStats_CovsD.qs"))
+SUs <- qread(file.path(OUTPUT_DIR, "spatial_units/sus.qs"))
+SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
 
 # # Load proposed covariates based on workshops from lookup xlsx
 # CovLookup <- readxl::read_xlsx("Input/covariates/covariate_description.xlsx", sheet = "AllLyr")
@@ -46,7 +49,7 @@ for (i in 1:length(names(ZStats_CovsC))) {
   ZStats_Covs[[i]] <- bind_cols(ZStats_CovsC[[i]], ZStats_CovsD[[i]])
 }
 names(ZStats_Covs) <- names(ZStats_CovsC)
-qsave(ZStats_Covs, file = "output/data/ZStats_Covs.qs", preset = "fast")
+qsave(ZStats_Covs, file = file.path(OUTPUT_DIR, "data/ZStats_Covs.qs"), preset = "fast")
 
 
 # CHECKING FOR MULTI-COLLINEARITY ---- 
@@ -60,7 +63,7 @@ Corr_Cont_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = Corr_Cont,
   scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) + 
   guides(color = "none", alpha = "none")
 # Export correlation plot
-ggsave(Corr_Cont_all_plot, file = "output/collinearity/Corr_Cont_all_plot.png", width = 2000, height = 2000, units = "px")
+ggsave(Corr_Cont_all_plot, file = file.path(OUTPUT_DIR, "collinearity/Corr_Cont_all_plot.png"), width = 2000, height = 2000, units = "px")
 
 ## Discrete Covariates ----
 ZStats_CovsD_all <- do.call(rbind, ZStats_CovsD)
@@ -79,12 +82,12 @@ Corr_Categ_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = cramers_v
   scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) + 
   guides(color = "none", alpha = "none")
 # Export correlation plot
-ggsave(Corr_Categ_all_plot, file = "output/collinearity/Corr_Categ_all_plot.png", width = 2000, height = 2000, units = "px")
+ggsave(Corr_Categ_all_plot, file = file.path(OUTPUT_DIR, "collinearity/Corr_Categ_all_plot.png"), width = 2000, height = 2000, units = "px")
 
 ## Remove covariates that are collinear ----
 ### Remove variables with correlations  > 0.6 OR < -0.6
-ZStats_Woody <- qread("output/data/ZStats_Woody.qs")
-ZStats_Covs <- qread("output/data/ZStats_Covs.qs")
+ZStats_Woody <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody.qs"))
+ZStats_Covs <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs.qs"))
 for (i in names(ZStats_Covs)) {
     ZStats_Covs[[i]] <- ZStats_Covs[[i]] %>% dplyr::select(-c(Elev, ForType))
 }
@@ -92,7 +95,7 @@ for (i in names(ZStats_Covs)) {
 # Select covariates for each clearing type----
 ## Agricultural Clearing ----
 
-SUs <- qread("output/spatial_units/sus.qs")
+SUs <- qread(file.path(OUTPUT_DIR, "spatial_units/sus.qs"))
 SUs_Ag <- SUs_ZStats_Ag <- SUs 
 ZStats_Woody_Ag <- ZStats_Woody
 ZStats_Covs_Ag <- ZStats_Covs
@@ -147,7 +150,7 @@ Corr_Cont_Ag_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = Corr_Co
   scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) + 
   guides(color = FALSE, alpha = FALSE)
 Corr_Cont_Ag_all_plot
-# ggsave(Corr_Cont_Ag_all_plot, file = "output/collinearity/Corr_Cont_Ag_all_plot.png", width = 2000, height = 2000, units = "px")
+# ggsave(Corr_Cont_Ag_all_plot, file = file.path(OUTPUT_DIR, "collinearity/Corr_Cont_Ag_all_plot.png"), width = 2000, height = 2000, units = "px")
 
 #### Discrete Covariates ----
 #### Combine all Covariates for all KMRs then select discrete covariates
@@ -172,13 +175,13 @@ Corr_CovD_Ag_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = cramers
   scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) + 
   guides(color = FALSE, alpha = FALSE)
 Corr_CovD_Ag_all_plot
-# ggsave(Corr_CovD_Ag_all_plot, file = "output/collinearity/Corr_CovD_Ag_all_plot.png", width = 2000, height = 2000, units = "px")
+# ggsave(Corr_CovD_Ag_all_plot, file = file.path(OUTPUT_DIR, "collinearity/Corr_CovD_Ag_all_plot.png"), width = 2000, height = 2000, units = "px")
 
 #### Export data
-qsave(SUs_Ag, file = "output/spatial_units/SUs_Ag.qs", preset = "fast")
-qsave(ZStats_Woody_Ag, file = "output/data/ZStats_Woody_Ag.qs", preset = "fast")
-qsave(ZStats_Covs_Ag, file = "output/data/ZStats_Covs_Ag.qs", preset = "fast")
-qsave(ZStats_Khab_Ag, file = "output/data/ZStats_Khab_Ag.qs", preset = "fast")
+qsave(SUs_Ag, file = file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"), preset = "fast")
+qsave(ZStats_Woody_Ag, file = file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs"), preset = "fast")
+qsave(ZStats_Covs_Ag, file = file.path(OUTPUT_DIR, "data/ZStats_Covs_Ag.qs"), preset = "fast")
+qsave(ZStats_Khab_Ag, file = file.path(OUTPUT_DIR, "data/ZStats_Khab_Ag.qs"), preset = "fast")
 
 ### Check for NAs in the data ----
 NA_Val <- t(map_dfr(ZStats_Covs_Ag, ~map(., ~sum(is.na(.)))))
@@ -202,7 +205,7 @@ NA_Pct
 
 ## Forestry Clearing ----
 
-SUs <- qread("output/spatial_units/sus.qs")
+SUs <- qread(file.path(OUTPUT_DIR, "spatial_units/sus.qs"))
 SUs_Fo <- SUs_ZStats_Fo <- SUs 
 ZStats_Woody_Fo <- ZStats_Woody
 ZStats_Covs_Fo <- ZStats_Covs
@@ -259,7 +262,7 @@ Corr_Cont_Fo_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = Corr_Co
   scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) + 
   guides(color = FALSE, alpha = FALSE)
 # Corr_Cont_Fo_all_plot
-ggsave(Corr_Cont_Fo_all_plot, file = "output/collinearity/Corr_Cont_Fo_all_plot.png", width = 2000, height = 2000, units = "px")
+ggsave(Corr_Cont_Fo_all_plot, file = file.path(OUTPUT_DIR, "collinearity/Corr_Cont_Fo_all_plot.png"), width = 2000, height = 2000, units = "px")
 
 #### Discrete Covariates ----
 #### Combine all Covariates for all KMRs then select discrete covariates
@@ -284,13 +287,13 @@ Corr_CovD_Ag_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = cramers
   scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) + 
   guides(color = FALSE, alpha = FALSE)
 # Corr_CovD_Ag_all_plot
-ggsave(Corr_CovD_Ag_all_plot, file = "output/collinearity/Corr_CovD_Ag_all_plot.png", width = 2000, height = 2000, units = "px")
+ggsave(Corr_CovD_Ag_all_plot, file = file.path(OUTPUT_DIR, "collinearity/Corr_CovD_Ag_all_plot.png"), width = 2000, height = 2000, units = "px")
 
 #### Export data
-qsave(SUs_Fo, file = "output/spatial_units/sus_fo.qs", preset = "fast")
-qsave(ZStats_Woody_Fo, file = "output/data/ZStats_Woody_Fo.qs", preset = "fast")
-qsave(ZStats_Covs_Fo, file = "output/data/ZStats_Covs_Fo.qs", preset = "fast")
-qsave(ZStats_Khab_Fo, file = "output/data/ZStats_Khab_Fo.qs", preset = "fast")
+qsave(SUs_Fo, file = file.path(OUTPUT_DIR, "spatial_units/sus_fo.qs"), preset = "fast")
+qsave(ZStats_Woody_Fo, file = file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs"), preset = "fast")
+qsave(ZStats_Covs_Fo, file = file.path(OUTPUT_DIR, "data/ZStats_Covs_Fo.qs"), preset = "fast")
+qsave(ZStats_Khab_Fo, file = file.path(OUTPUT_DIR, "data/ZStats_Khab_Fo.qs"), preset = "fast")
 
 ### Check for NAs in the data ----
 NA_Val <- t(map_dfr(ZStats_Covs_Fo, ~map(., ~sum(is.na(.)))))
@@ -313,7 +316,7 @@ NA_Val
 NA_Pct
 
 ## Infrastructure Clearing ----
-SUs <- qread("output/spatial_units/sus.qs")
+SUs <- qread(file.path(OUTPUT_DIR, "spatial_units/sus.qs"))
 SUs_In <- SUs_ZStats_In <- SUs
 ZStats_Woody_In <- ZStats_Woody
 ZStats_Covs_In <- ZStats_Covs
@@ -373,7 +376,7 @@ Corr_Cont_In_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = Corr_Co
   scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) + 
   guides(color = "none", alpha = "none")
 # Corr_Cont_In_all_plot
-ggsave(Corr_Cont_In_all_plot, file = "output/collinearity/Corr_Cont_In_all_plot.png", width = 2000, height = 2000, units = "px")
+ggsave(Corr_Cont_In_all_plot, file = file.path(OUTPUT_DIR, "collinearity/Corr_Cont_In_all_plot.png"), width = 2000, height = 2000, units = "px")
 
 #### Discrete Covariates ----
 #### Combine all Covariates for all KMRs then select discrete covariates
@@ -395,13 +398,13 @@ Corr_CovD_In_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = cramers
   scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) + 
   guides(color = "none", alpha = "none")
 # Corr_CovD_In_all_plot
-ggsave(Corr_CovD_In_all_plot, file = "output/collinearity/Corr_CovD_In_all_plot.png", width = 2000, height = 2000, units = "px")
+ggsave(Corr_CovD_In_all_plot, file = file.path(OUTPUT_DIR, "collinearity/Corr_CovD_In_all_plot.png"), width = 2000, height = 2000, units = "px")
 
 #### Export data
-qsave(SUs_In, file = "output/spatial_units/sus_In.qs", preset = "fast")
-qsave(ZStats_Woody_In, file = "output/data/ZStats_Woody_In.qs", preset = "fast")
-qsave(ZStats_Covs_In, file = "output/data/ZStats_Covs_In.qs", preset = "fast")
-qsave(ZStats_Khab_In, file = "output/data/ZStats_Khab_In.qs", preset = "fast")
+qsave(SUs_In, file = file.path(OUTPUT_DIR, "spatial_units/sus_In.qs"), preset = "fast")
+qsave(ZStats_Woody_In, file = file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs"), preset = "fast")
+qsave(ZStats_Covs_In, file = file.path(OUTPUT_DIR, "data/ZStats_Covs_In.qs"), preset = "fast")
+qsave(ZStats_Khab_In, file = file.path(OUTPUT_DIR, "data/ZStats_Khab_In.qs"), preset = "fast")
 
 ### Check for NAs in the data ----
 map(ZStats_Covs_In, ~summary(.))
@@ -434,10 +437,10 @@ NA_Pct
 #### If DIC varies significantly in repeated runs, then we need to set custom priors
 ### Agricultural clearing in each KMR ----
 
-ZStats_Woody_Ag <- qread("output/data/ZStats_Woody_Ag.qs")
-ZStats_Covs_Ag <- qread("output/data/ZStats_Covs_Ag.qs")
-SUs_Ag <- qread("output/spatial_units/SUs_Ag.qs")
-SA1s <- qread("output/spatial_units/sa1s.qs")
+ZStats_Woody_Ag <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs"))
+ZStats_Covs_Ag <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_Ag.qs"))
+SUs_Ag <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"))
+SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
 KMRs <- names(SUs_Ag)
 
 ptm <- proc.time()
@@ -454,10 +457,10 @@ for(kmr in KMRs){
 proc.time() - ptm
 
 ### Forestry clearing in each KMR ----
-SUs_Fo <- qread("output/spatial_units/sus_fo.qs")
-ZStats_Woody_Fo <- qread("output/data/ZStats_Woody_Fo.qs")
-ZStats_Covs_Fo <- qread("output/data/ZStats_Covs_Fo.qs")
-SA1s <- qread("output/spatial_units/sa1s.qs")
+SUs_Fo <- qread(file.path(OUTPUT_DIR, "spatial_units/sus_fo.qs"))
+ZStats_Woody_Fo <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs"))
+ZStats_Covs_Fo <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_Fo.qs"))
+SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
 KMRs <- names(SUs_Fo)
 # summary(ZStats_Woody_Fo$FW$sum.woody)
 ptm <- proc.time()
@@ -474,10 +477,10 @@ for(kmr in KMRs){
 proc.time() - ptm
 
 ### Infrastructure clearing in each KMR ----
-SUs_In <- qread("output/spatial_units/sus_In.qs")
-ZStats_Woody_In <- qread("output/data/ZStats_Woody_In.qs")
-ZStats_Covs_In <- qread("output/data/ZStats_Covs_In.qs")
-SA1s <- qread("output/spatial_units/sa1s.qs")
+SUs_In <- qread(file.path(OUTPUT_DIR, "spatial_units/sus_In.qs"))
+ZStats_Woody_In <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs"))
+ZStats_Covs_In <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_In.qs"))
+SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
 KMRs <- names(SUs_In)
 inla.setOption(num.threads="8:1")
 # map(ZStats_Covs_In, ~summary(.))
@@ -497,9 +500,9 @@ proc.time() - ptm
 
 
 # ptm <- proc.time()
-# Test_2 <- fit_model2(KMR="CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, OutputDir = "output/models/")
+# Test_2 <- fit_model2(KMR="CC", ClearType = 1, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD = ZStats_Covs, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, OutputDir = file.path(OUTPUT_DIR, "models/")
 # proc.time() - ptm
-# Test_2 <- qread("output/models/Model_CC_Ag_.qs")
+# Test_2 <- qread(file.path(OUTPUT_DIR, "models/Model_CC_Ag_.qs"))
 # summary(Test_2$PModel)
 # 
 # formula_1 <- as.formula(paste0(paste("P", paste(names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse=" + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
@@ -513,10 +516,10 @@ proc.time() - ptm
 
 ## Agricultural----
 ## Load data
-ZStats_Woody_Ag <- qread("output/data/ZStats_Woody_Ag.qs")
-ZStats_Covs_Ag <- qread("output/data/ZStats_Covs_Ag.qs")
-SUs_Ag <- qread("output/spatial_units/SUs_Ag.qs")
-SA1s <- qread("output/spatial_units/sa1s.qs")
+ZStats_Woody_Ag <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs"))
+ZStats_Covs_Ag <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_Ag.qs"))
+SUs_Ag <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"))
+SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
 KMRs <- names(SUs_Ag)
 
 ### Adjust inla.setOption(num.threads= "8:1") to allocate the number of threads to be used in 1 inla run. The number need to be reduce if running parallel.
@@ -528,7 +531,7 @@ for(kmr in KMRs){
   Select_model(KMR = kmr, ClearType = 1, SpatUnits = SUs_Ag, 
                RespData = ZStats_Woody_Ag, CovsCD = ZStats_Covs_Ag, 
                SA1sPoly = SA1s, Direction = "FC", Verbose = FALSE, 
-               N_retry=3, Initial_Tlimit = 1000, OutputDir = "output/models/")
+               N_retry=3, Initial_Tlimit = 1000, OutputDir = file.path(OUTPUT_DIR, "models/"))
 }
 toc(log = TRUE)
 
@@ -538,16 +541,16 @@ for(kmr in KMRs){
   Select_model(KMR = kmr, ClearType = 1, SpatUnits = SUs_Ag, 
                RespData = ZStats_Woody_Ag, CovsCD = ZStats_Covs_Ag, 
                SA1sPoly = SA1s, Direction = "BC", Verbose = FALSE, 
-               N_retry=3, Initial_Tlimit = 1000, OutputDir = "output/models/")
+               N_retry=3, Initial_Tlimit = 1000, OutputDir = file.path(OUTPUT_DIR, "models/"))
 }
 toc(log = TRUE)
 
 ## Forestry----
 ## Load data
-ZStats_Woody_Fo <- qread("output/data/ZStats_Woody_Fo.qs")
-ZStats_Covs_Fo <- qread("output/data/ZStats_Covs_Fo.qs")
-SUs_Fo <- qread("output/spatial_units/sus_Fo.qs")
-SA1s <- qread("output/spatial_units/sa1s.qs")
+ZStats_Woody_Fo <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs"))
+ZStats_Covs_Fo <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_Fo.qs"))
+SUs_Fo <- qread(file.path(OUTPUT_DIR, "spatial_units/sus_Fo.qs"))
+SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
 KMRs <- names(SUs_Fo)
 
 ### Adjust inla.setOption(num.threads= "8:1") to allocate the number of threads to be used in 1 inla run. The number need to be reduce if running parallel.
@@ -559,7 +562,7 @@ for(kmr in KMRs){
   Select_model(KMR = kmr, ClearType = 3, SpatUnits = SUs_Fo, 
                RespData = ZStats_Woody_Fo, CovsCD = ZStats_Covs_Fo, 
                SA1sPoly = SA1s, Direction = "FC", Verbose = FALSE, 
-               N_retry=3, Initial_Tlimit = 1000, OutputDir = "output/models/")
+               N_retry=3, Initial_Tlimit = 1000, OutputDir = file.path(OUTPUT_DIR, "models/"))
 }
 toc(log = TRUE)
 
@@ -569,16 +572,16 @@ for(kmr in KMRs){
   Select_model(KMR = kmr, ClearType = 3, SpatUnits = SUs_Fo, 
                RespData = ZStats_Woody_Fo, CovsCD = ZStats_Covs_Fo, 
                SA1sPoly = SA1s, Direction = "BC", Verbose = FALSE, 
-               N_retry=3, Initial_Tlimit = 1000, OutputDir = "output/models/")
+               N_retry=3, Initial_Tlimit = 1000, OutputDir = file.path(OUTPUT_DIR, "models/"))
 }
 toc(log = TRUE)
 
 ## Infrastructure----
 ## Load data
-ZStats_Woody_In <- qread("output/data/ZStats_Woody_In.qs")
-ZStats_Covs_In <- qread("output/data/ZStats_Covs_In.qs")
-SUs_In <- qread("output/spatial_units/sus_In.qs")
-SA1s <- qread("output/spatial_units/sa1s.qs")
+ZStats_Woody_In <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs"))
+ZStats_Covs_In <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_In.qs"))
+SUs_In <- qread(file.path(OUTPUT_DIR, "spatial_units/sus_In.qs"))
+SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
 KMRs <- names(SUs_In)
 
 # inla.setOption(num.threads="8:1")
@@ -589,7 +592,7 @@ for(kmr in KMRs){
   Select_model(KMR = kmr, ClearType = 2, SpatUnits = SUs_In, 
                RespData = ZStats_Woody_In, CovsCD = ZStats_Covs_In, 
                SA1sPoly = SA1s, Direction = "FC", Verbose = FALSE, 
-               N_retry=3, Initial_Tlimit = 1000, OutputDir = "output/models/")
+               N_retry=3, Initial_Tlimit = 1000, OutputDir = file.path(OUTPUT_DIR, "models/"))
 }
 toc(log = TRUE)
 
@@ -600,22 +603,22 @@ for(kmr in KMRs){
   Select_model(KMR = kmr, ClearType = 2, SpatUnits = SUs_In, 
                RespData = ZStats_Woody_In, CovsCD = ZStats_Covs_In, 
                SA1sPoly = SA1s, Direction = "BC", Verbose = FALSE, 
-               N_retry=3, Initial_Tlimit = 1000, OutputDir = "output/models/")
+               N_retry=3, Initial_Tlimit = 1000, OutputDir = file.path(OUTPUT_DIR, "models/"))
 }
 toc(log = TRUE)
 
 
 ## Check model selection step ---- 
 ### Check errors in Model selections steps ---
-SUs_Ag <- qread("output/spatial_units/SUs_Ag.qs")
+SUs_Ag <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"))
 KMRs <- names(SUs_Ag)
 rm(SUs_Ag)
 ClrTyps <- c("Ag", "Fo", "In")
 
 for(ClrTyp in ClrTyps){
   for(kmr in KMRs){
-    SelModel_FC <- qread(paste0("output/models/SelModel_", kmr, "_" , ClrTyp,"_FC.qs"))
-    SelModel_BC <- qread(paste0("output/models/SelModel_", kmr, "_" , ClrTyp,"_FC.qs"))
+    SelModel_FC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_" , ClrTyp,"_FC.qs")))
+    SelModel_BC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_" , ClrTyp,"_FC.qs")))
     if(length(SelModel_FC$ERROR_ls) == 0){
       cat(ClrTyp, kmr, " Forward selection: NO ERROR! :-)", "\n")
     }else if(length(SelModel_FC$ERROR_ls) > 0){
@@ -634,7 +637,7 @@ for(ClrTyp in ClrTyps){
 ### Compare DIC values for Forward complete and backward complete model selection ----
 ## Also verify the minimum DIC values recorded in the model selection steps (WHILE LOOP) and the final selected model  
 
-SUs_Ag <- qread("output/spatial_units/SUs_Ag.qs")
+SUs_Ag <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"))
 KMRs <- names(SUs_Ag)
 rm(SUs_Ag)
 ClrTyps <- c("Ag", "Fo", "In")
@@ -643,8 +646,8 @@ for(ClrTyp in ClrTyps){  ## Agriculture, Forestry, Infrastructure
   for(kmr in KMRs){  ## KMRs
     
     # read model selection results for both forward and backward selection
-    SelModel_BC <- qread(paste0("output/models/SelModel_", kmr, "_" , ClrTyp , "_BC.qs"))
-    SelModel_FC <- qread(paste0("output/models/SelModel_", kmr, "_" , ClrTyp , "_FC.qs"))
+    SelModel_BC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_" , ClrTyp , "_BC.qs")))
+    SelModel_FC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_" , ClrTyp , "_FC.qs")))
     
     # Find minimum DIC values recorded in the model selection steps (WHILE LOOP)
     MinDIC_BC <- SelModel_BC$DIC_ls[which.min(unlist(SelModel_BC$DIC_ls))]
@@ -690,10 +693,10 @@ for(ClrTyp in ClrTyps){  ## Agriculture, Forestry, Infrastructure
 ## Export model selection results and coefficient estimates ----
 
 ### Agriculture ----
-SUs_Ag <- qread("output/spatial_units/SUs_Ag.qs")
-SA1s <- qread("output/spatial_units/sa1s.qs")
-ZStats_Woody_Ag <- qread("output/data/ZStats_Woody_Ag.qs")
-ZStats_Covs_Ag <- qread("output/data/ZStats_Covs_Ag.qs")
+SUs_Ag <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"))
+SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
+ZStats_Woody_Ag <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs"))
+ZStats_Covs_Ag <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_Ag.qs"))
 KMRs <- names(ZStats_Covs_Ag)
 kmr <- KMRs[1]
 Model_Ag <- fit_model2(KMR = kmr, ClearType = 1, SpatUnits = SUs_Ag, RespData = ZStats_Woody_Ag, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
@@ -703,8 +706,8 @@ kmr="CC"
 for (kmr in KMRs){
   
   # read model selection results for both forward and backward selection
-  SelModel_BC <- qread(paste0("output/models/SelModel_", kmr, "_Ag_BC.qs"))
-  SelModel_FC <- qread(paste0("output/models/SelModel_", kmr, "_Ag_FC.qs"))
+  SelModel_BC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_Ag_BC.qs")))
+  SelModel_FC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_Ag_FC.qs")))
   
   # Find minimum DIC values recorded in the model selection steps (WHILE LOOP)
   MinDIC_BC <- SelModel_BC$DIC_ls[which.min(unlist(SelModel_BC$DIC_ls))]
@@ -745,13 +748,13 @@ Cov_ls_Ag_tab <- Cov_ls_Ag %>% filter_all(any_vars(!is.na(.))) %>%
   filter(Variable != "Land use type5",
          !(is.na(CC) & is.na(CST) & is.na(DRP) & is.na(FW) & is.na(NC) & is.na(NT) & is.na(NS) & is.na(R) & is.na(SC) ))
 # Export the table
-write.csv(Cov_ls_Ag_tab, "output/models/Cov_ls_Ag.csv", row.names = FALSE, na = "")
+write.csv(Cov_ls_Ag_tab, file.path(OUTPUT_DIR, "models/Cov_ls_Ag.csv"), row.names = FALSE, na = "")
 
 ### Forestry ----
-SUs_Fo <- qread("output/spatial_units/SUs_Fo.qs")
-SA1s <- qread("output/spatial_units/sa1s.qs")
-ZStats_Woody_Fo <- qread("output/data/ZStats_Woody_Fo.qs")
-ZStats_Covs_Fo <- qread("output/data/ZStats_Covs_Fo.qs")
+SUs_Fo <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_Fo.qs"))
+SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
+ZStats_Woody_Fo <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs"))
+ZStats_Covs_Fo <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_Fo.qs"))
 KMRs <- names(ZStats_Covs_Fo)
 kmr <- KMRs[1]
 Model_Fo <- fit_model2(KMR = kmr, ClearType = 3, SpatUnits = SUs_Fo, RespData = ZStats_Woody_Fo, CovsCD = ZStats_Covs_Fo, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
@@ -761,8 +764,8 @@ kmr="CC"
 for (kmr in KMRs){
   
   # read model selection results for both forward and backward selection
-  SelModel_BC <- qread(paste0("output/models/SelModel_", kmr, "_Fo_BC.qs"))
-  SelModel_FC <- qread(paste0("output/models/SelModel_", kmr, "_Fo_FC.qs"))
+  SelModel_BC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_Fo_BC.qs")))
+  SelModel_FC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_Fo_FC.qs")))
   
   # Find minimum DIC values recorded in the model selection steps (WHILE LOOP)
   MinDIC_BC <- SelModel_BC$DIC_ls[which.min(unlist(SelModel_BC$DIC_ls))]
@@ -802,13 +805,13 @@ Cov_ls_tab <- Cov_ls_Fo %>%
   filter(Variable != "Land use type5",
          !(is.na(CC) & is.na(CST) & is.na(DRP) & is.na(FW) & is.na(NC) & is.na(NT) & is.na(NS) & is.na(R) & is.na(SC) ))
 Cov_ls_tab
-write.csv(Cov_ls_tab, "output/models/Cov_ls_Fo.csv", row.names = FALSE, na = "")
+write.csv(Cov_ls_tab, file.path(OUTPUT_DIR, "models/Cov_ls_Fo.csv"), row.names = FALSE, na = "")
 
 ### Infrastructure ----
-SUs_In <- qread("output/spatial_units/SUs_In.qs")
-SA1s <- qread("output/spatial_units/sa1s.qs")
-ZStats_Woody_In <- qread("output/data/ZStats_Woody_In.qs")
-ZStats_Covs_In <- qread("output/data/ZStats_Covs_In.qs")
+SUs_In <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_In.qs"))
+SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
+ZStats_Woody_In <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs"))
+ZStats_Covs_In <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_In.qs"))
 KMRs <- names(ZStats_Covs_In)
 kmr <- KMRs[1]
 Model_In <- fit_model2(KMR = kmr, ClearType = 2, SpatUnits = SUs_In, RespData = ZStats_Woody_In, CovsCD = ZStats_Covs_In, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
@@ -818,8 +821,8 @@ kmr="NC"
 for (kmr in KMRs){
   
   # read model selection results for both forward and backward selection
-  SelModel_BC <- qread(paste0("output/models/SelModel_", kmr, "_In_BC.qs"))
-  SelModel_FC <- qread(paste0("output/models/SelModel_", kmr, "_In_FC.qs"))
+  SelModel_BC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_In_BC.qs")))
+  SelModel_FC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_In_FC.qs")))
   
   # Find minimum DIC values recorded in the model selection steps (WHILE LOOP)
   MinDIC_BC <- SelModel_BC$DIC_ls[which.min(unlist(SelModel_BC$DIC_ls))]
@@ -858,24 +861,24 @@ Cov_ls_tab <- Cov_ls_In %>%
   filter(Variable != "Land use type5",
                             !(is.na(CC) & is.na(CST) & is.na(DRP) & is.na(FW) & is.na(NC) & is.na(NT) & is.na(NS) & is.na(R) & is.na(SC) ))
 
-write.csv(Cov_ls_tab, "output/models/Cov_ls_In.csv", row.names = FALSE, na = "")
+write.csv(Cov_ls_tab, file.path(OUTPUT_DIR, "models/Cov_ls_In.csv"), row.names = FALSE, na = "")
 
 # MODEL PREDICTIONS ----
 ## Refit the best model ----
 ### Identify model with lower DIC (Between FC & BC)
 ### Refit the model to save internal GMRF approximations for inla.posterior.sample(): control.compute = (list(config = TRUE))
-SUs_Ag <- qread("output/spatial_units/sus_Ag.qs")
+SUs_Ag <- qread(file.path(OUTPUT_DIR, "spatial_units/sus_Ag.qs"))
 KMRs <- names(SUs_Ag)
 ClearTypes <- c(1, 2, 3)
 
 walk(ClearTypes, function(ClearTypes_val){
   walk(KMRs, function(kmr_val){
     print(paste0("Refit model for ", kmr_val, " with ClearType ", ClearTypes_val))
-    refit_model(KMR = kmr_val, ClearType = ClearTypes_val, ModelDir = "output/models/")
+    refit_model(KMR = kmr_val, ClearType = ClearTypes_val, ModelDir = file.path(OUTPUT_DIR, "models/"))
   })
 })
 
-refit_model(KMR = "CC", ClearType = 1, ModelDir = "output/models/")
+refit_model(KMR = "CC", ClearType = 1, ModelDir = file.path(OUTPUT_DIR, "models/"))
 
 # Prediction by sampling ----
 
@@ -885,7 +888,7 @@ refit_model(KMR = "CC", ClearType = 1, ModelDir = "output/models/")
 
 ## Example for the prediction by sampling
 # Load directory
-MODEL <- qread("output/models/Model_CC_Ag.qs")
+MODEL <- qread(file.path(OUTPUT_DIR, "models/Model_CC_Ag.qs"))
 CT <- if(MODEL$ClearType == "1"){"Ag"} else if(MODEL$ClearType == "2"){"In"} else if(MODEL$ClearType == "3"){"Fo"}
 N <- 50000 # Number of samples
 cat("\n\nRun prediction by sampling " , N , "times for\nKMR: ",  MODEL$KMR, "\nClear Type: ", CT, "\n\n")
@@ -894,33 +897,33 @@ cat("\n\nRun prediction by sampling " , N , "times for\nKMR: ",  MODEL$KMR, "\nC
 Pred <- predict_model3(model = MODEL, N = N, RandEff = "SA1ID")
 
 # Save Predictions
-output_name <- file.path("output/predictions/Pred_CC_Ag.qs")
+output_name <- file.path(file.path(OUTPUT_DIR, "predictions/Pred_CC_Ag.qs"))
 cat("\n\nSave Predictions to: ", output_name, "\n")
 qsave(Pred, output_name)
 
 # Generate shapefile output----
-walk(1:3, ~Combine_Predictions(ClearType = .x, Prediction_DIR = "output/predictions/", WRITE_SHP = TRUE, WRITE_DATA = TRUE))
+walk(1:3, ~Combine_Predictions(ClearType = .x, Prediction_DIR = file.path(OUTPUT_DIR, "predictions/"), WRITE_SHP = TRUE, WRITE_DATA = TRUE))
 
 ## Save predictions to File Geodatabase (GDB)
 ## If the Geodatabase export is done in Combine_Predictions function then this part can be skipped
-# gdb_path <- "output/predictions.gdb"
-# Pred_Ag <- qread("output/predictions/Pred_Ag.qs")
+# gdb_path <- file.path(OUTPUT_DIR, "predictions.gdb"
+# Pred_Ag <- qread(file.path(OUTPUT_DIR, "predictions/Pred_Ag.qs"))
 # st_write(Pred_Ag, dsn = gdb_path, layer = "Pred_Ag", driver = "OpenFileGDB")
-# Pred_In <- qread("output/predictions/Pred_In.qs")
+# Pred_In <- qread(file.path(OUTPUT_DIR, "predictions/Pred_In.qs"))
 # st_write(Pred_In, dsn = gdb_path, layer = "Pred_In", driver = "OpenFileGDB")
-# Pred_Fo <- qread("output/predictions/Pred_Fo.qs")
+# Pred_Fo <- qread(file.path(OUTPUT_DIR, "predictions/Pred_Fo.qs"))
 # st_write(Pred_Fo, dsn = gdb_path, layer = "Pred_Fo", driver = "OpenFileGDB")
 
 # Koala habitat loss risk ----
 
 ## Load predictions output data and Woody vegetation data (containing Koala habitat loss column)
-Pred_Ag <- qread("output/predictions/Pred_Ag.qs")
-Pred_In <- qread("output/predictions/Pred_In.qs")
-Pred_Fo <- qread("output/predictions/Pred_Fo.qs")
+Pred_Ag <- qread(file.path(OUTPUT_DIR, "predictions/Pred_Ag.qs"))
+Pred_In <- qread(file.path(OUTPUT_DIR, "predictions/Pred_In.qs"))
+Pred_Fo <- qread(file.path(OUTPUT_DIR, "predictions/Pred_Fo.qs"))
 
-ZStats_Woody_Ag <- qread("output/data/ZStats_Woody_Ag.qs")
-ZStats_Woody_In <- qread("output/data/ZStats_Woody_In.qs")
-ZStats_Woody_Fo <- qread("output/data/ZStats_Woody_Fo.qs")
+ZStats_Woody_Ag <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs"))
+ZStats_Woody_In <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs"))
+ZStats_Woody_Fo <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs"))
 
 ## Lookup dataframe for KMR acronyms and KMR Full names
 KMR_DF <- Pred_Ag %>% st_drop_geometry() %>%  dplyr::select(KMR) %>% unique() %>% mutate(KMR_a = str_extract_all(KMR, "\\b[A-Za-z]") %>% sapply(paste, collapse = ""))
@@ -935,18 +938,18 @@ Khab_risk_In <- Get_Khab_loss_risk(Pred_data = Pred_In, Khab_data = Khab_data_In
 Khab_risk_Fo <- Get_Khab_loss_risk(Pred_data = Pred_Fo, Khab_data = Khab_data_Fo)
 
 ## Save the output
-qsave(Khab_risk_Ag, file = "output/predictions/Khab_risk_Ag.qs", preset = "fast")
-qsave(Khab_risk_In, file = "output/predictions/Khab_risk_In.qs", preset = "fast")
-qsave(Khab_risk_Fo, file = "output/predictions/Khab_risk_Fo.qs", preset = "fast")
+qsave(Khab_risk_Ag, file = file.path(OUTPUT_DIR, "predictions/Khab_risk_Ag.qs"), preset = "fast")
+qsave(Khab_risk_In, file = file.path(OUTPUT_DIR, "predictions/Khab_risk_In.qs"), preset = "fast")
+qsave(Khab_risk_Fo, file = file.path(OUTPUT_DIR, "predictions/Khab_risk_Fo.qs"), preset = "fast")
 
-Khab_risk_Ag <- qread("output/predictions/Khab_risk_Ag.qs")
-Khab_risk_In <- qread("output/predictions/Khab_risk_In.qs")
-Khab_risk_Fo <- qread("output/predictions/Khab_risk_Fo.qs")
+Khab_risk_Ag <- qread(file.path(OUTPUT_DIR, "predictions/Khab_risk_Ag.qs"))
+Khab_risk_In <- qread(file.path(OUTPUT_DIR, "predictions/Khab_risk_In.qs"))
+Khab_risk_Fo <- qread(file.path(OUTPUT_DIR, "predictions/Khab_risk_Fo.qs"))
 
 st_write(obj = Khab_risk_Ag, dsn = gdb_path, layer = "Khab_risk_Ag", driver = "OpenFileGDB")
 st_write(obj = Khab_risk_In, dsn = gdb_path, layer = "Khab_risk_In", driver = "OpenFileGDB")
 st_write(obj = Khab_risk_Fo, dsn = gdb_path, layer = "Khab_risk_Fo", driver = "OpenFileGDB")
 st_layers(gdb_path)
-st_write(Khab_risk_Ag, "output/predictions/Khab_risk_Ag.shp", delete_layer = TRUE, append = FALSE)
-st_write(Khab_risk_In, "output/predictions/Khab_risk_In.shp", delete_layer = TRUE, append = FALSE)
-st_write(Khab_risk_Fo, "output/predictions/Khab_risk_Fo.shp", delete_layer = TRUE, append = FALSE)
+st_write(Khab_risk_Ag, file.path(OUTPUT_DIR, "predictions/Khab_risk_Ag.shp"), delete_layer = TRUE, append = FALSE)
+st_write(Khab_risk_In, file.path(OUTPUT_DIR, "predictions/Khab_risk_In.shp"), delete_layer = TRUE, append = FALSE)
+st_write(Khab_risk_Fo, file.path(OUTPUT_DIR, "predictions/Khab_risk_Fo.shp"), delete_layer = TRUE, append = FALSE)
