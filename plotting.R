@@ -18,13 +18,8 @@ theme_set(theme_pubr())
 source("functions.R")
 
 # Prepare data ----
-
-<<<<<<< HEAD
-
-=======
->>>>>>> 6eb5756c2608aa85c708c3f95da7fa7d35418bb2
 ## Set directory
-## Note: change the path to the output directory
+## Note: change the path to the input and output directory
 INPUT_DIR <- file.path("R:/HABCLEAR22-Q5221/risk-model/input")
 OUTPUT_DIR <- file.path("R:/HABCLEAR22-Q5221/risk-model/output")
 
