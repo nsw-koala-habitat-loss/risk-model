@@ -1163,8 +1163,11 @@ Get_Khab_loss_risk <- function(Pred_data, Khab_data){
   return(Pred_Khab)
 }
 
-# Function to process model fitting and covariate extraction ----
-Get_cov_coeff_long <- function(ClearType) {
+#' Function to process model fitting and covariate extraction ----
+#' @param ClearType Clearing type: 1 = Agriculture, 2 = Infrastructure, 3 = Forestry
+#' @param OUTPUT_DIR Directory containing the output files
+
+Get_cov_coeff_long <- function(ClearType, OUTPUT_DIR) {
   # ClearType
   if(ClearType == 1){
     CT <- "Ag"
@@ -1175,10 +1178,10 @@ Get_cov_coeff_long <- function(ClearType) {
   }
   
   # Read the required datasets based on the clear type - CT
-  SUs <- qread(paste0("output/spatial_units/sus_", CT, ".qs"))
-  ZStats_Woody <- qread(paste0("output/data/ZStats_Woody_", CT, ".qs"))
-  ZStats_Covs <- qread(paste0("output/data/ZStats_Covs_", CT, ".qs"))
-  SA1s <- qread("output/spatial_units/sa1s.qs")
+  SUs <- qread(file.path(OUTPUT_DIR, paste0("spatial_units/sus_", CT, ".qs")))
+  ZStats_Woody <- qread(file.path(OUTPUT_DIR, paste0("data/ZStats_Woody_", CT, ".qs")))
+  ZStats_Covs <- qread(file.path(OUTPUT_DIR, paste0("data/ZStats_Covs_", CT, ".qs")))
+  SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
   
   KMRs <- names(ZStats_Covs)
   kmr <- KMRs[1]
@@ -1195,7 +1198,7 @@ Get_cov_coeff_long <- function(ClearType) {
   
   # Loop through each KMR and gather covariate and coefficient data
   for (kmr in KMRs) {
-    MODEL <- qread(paste0("output/models/Model_", kmr, "_", CT, ".qs"))
+    MODEL <- qread(file.path(OUTPUT_DIR, paste0("models/Model_", kmr, "_", CT, ".qs")))
     
     Cov <- summary(MODEL$PModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>%
       dplyr::select(Covariate) %>% unlist()
