@@ -19,7 +19,10 @@ source("functions.R")
 
 # Prepare data ----
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 6eb5756c2608aa85c708c3f95da7fa7d35418bb2
 ## Set directory
 ## Note: change the path to the output directory
 INPUT_DIR <- file.path("R:/HABCLEAR22-Q5221/risk-model/input")
@@ -676,6 +679,11 @@ Khab_risk_In <- qread(file.path(OUTPUT_DIR, "predictions/Khab_risk_In.qs"))
 
 #### Base Layers
 KMR_shp <- st_read(file.path(INPUT_DIR, "spatial_units/biodiversity_nsw_koala_modelling_regions_v1p1/NSW_Koala_Modelling_Regions_v1.1.shp"))
+<<<<<<< HEAD
+=======
+
+## Data Source: https://www.abs.gov.au/AUSSTATS/abs@.nsf/DetailsPage/1270.0.55.004July%202016?OpenDocument
+>>>>>>> 6eb5756c2608aa85c708c3f95da7fa7d35418bb2
 
 ## Data Source: https://www.abs.gov.au/AUSSTATS/abs@.nsf/DetailsPage/1270.0.55.004July%202016?OpenDocument
 ABS_urb <- st_read("D:/Data/NSW_Deforestation/risk-model-covariates/Input/2016_UCL_shape/UCL_2016_AUST.shp") %>% 

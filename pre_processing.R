@@ -20,8 +20,12 @@ library(qs)
 source("functions.R")
 
 ## Set directory
+<<<<<<< HEAD
 
 ## Note: change the path to the input and output directory
+=======
+## Note: change the path to the output directory
+>>>>>>> 6eb5756c2608aa85c708c3f95da7fa7d35418bb2
 INPUT_DIR <- file.path("R:/HABCLEAR22-Q5221/risk-model/input")
 OUTPUT_DIR <- file.path("R:/HABCLEAR22-Q5221/risk-model/output")
 
