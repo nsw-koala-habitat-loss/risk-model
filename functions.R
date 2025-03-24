@@ -368,6 +368,7 @@ predict_model <- function(Model) {
   return(list(Layer = Layer, PModel = PModel, NModel = NModel))
 }
 
+
 # function to create spatial predictions from model----
 predict_model2 <- function(Model, Verbose = FALSE, N_retry=10, Initial_Tlimit = 1000) {
   # Model = the fitted model (an output from fit_model)

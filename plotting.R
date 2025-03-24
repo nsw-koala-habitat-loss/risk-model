@@ -19,6 +19,7 @@ source("functions.R")
 
 # Prepare data ----
 
+
 ## Set directory
 ## Note: change the path to the output directory
 INPUT_DIR <- file.path("R:/HABCLEAR22-Q5221/risk-model/input")
