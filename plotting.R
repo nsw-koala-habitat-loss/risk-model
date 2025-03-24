@@ -19,10 +19,15 @@ source("functions.R")
 
 # Prepare data ----
 
+## Set directory
+## Note: change the path to the output directory
+INPUT_DIR <- file.path("R:/HABCLEAR22-Q5221/risk-model/input")
+OUTPUT_DIR <- file.path("R:/HABCLEAR22-Q5221/risk-model/output")
+
 ## Extract long format dataframe of covariate selection results
-Cov_ls_Ag_long <- Get_cov_coeff_long(1)
-Cov_ls_In_long <- Get_cov_coeff_long(2)
-Cov_ls_Fo_long <- Get_cov_coeff_long(3)
+Cov_ls_Ag_long <- Get_cov_coeff_long(1, OUTPUT_DIR = OUTPUT_DIR)
+Cov_ls_In_long <- Get_cov_coeff_long(2, OUTPUT_DIR = OUTPUT_DIR)
+Cov_ls_Fo_long <- Get_cov_coeff_long(3, OUTPUT_DIR = OUTPUT_DIR)
 
 # Combine results from all clearing types ----
 Cov_df <- full_join(Cov_ls_Ag_long, Cov_ls_Fo_long, by = c("Covariate", "kmr")) %>% 
@@ -30,8 +35,8 @@ Cov_df <- full_join(Cov_ls_Ag_long, Cov_ls_Fo_long, by = c("Covariate", "kmr")) 
   filter(!Covariate == "LandUse5") %>% 
   dplyr::select(Covariate, kmr, Cof_PModel_Ag, Cof_NModel_Ag, Cof_PModel_Fo, Cof_NModel_Fo, Cof_PModel_In, Cof_NModel_In) %>% 
   arrange(kmr, Covariate)
-qsave(Cov_df, "output/data/Cov_df.qs")
-Cov_df <- qread("output/data/Cov_df.qs")
+qsave(Cov_df, file.path(OUTPUT_DIR, "data/Cov_df.qs"))
+Cov_df <- qread(file.path(OUTPUT_DIR, "data/Cov_df.qs"))
 
 # Checking for patterns for KMR along the coast
 # Cov_df <- Cov_df %>% 
@@ -53,14 +58,14 @@ Cov_df2_long <- rbind(Cov_df2 %>% dplyr::select(Covariate, kmr, Cof_PModel_Ag, C
                       Cov_df2 %>% dplyr::select(Covariate, kmr, Cof_PModel_Fo, Cof_NModel_Fo, x1, y1) %>% mutate(Model = "Forestry") %>% rename(Cof_PModel = Cof_PModel_Fo, Cof_NModel = Cof_NModel_Fo),
                       Cov_df2 %>% dplyr::select(Covariate, kmr, Cof_PModel_In, Cof_NModel_In, x1, y1) %>% mutate(Model = "Infrastructure") %>% rename(Cof_PModel = Cof_PModel_In, Cof_NModel = Cof_NModel_In))
 
-qsave(Cov_df_long, "output/data/Cov_df_long_ForPlotting.qs")
-qsave(Cov_df2_long, "output/data/Cov_df2_long_ForPlotting.qs")
+qsave(Cov_df_long, file.path(OUTPUT_DIR, "data/Cov_df_long_ForPlotting.qs"))
+qsave(Cov_df2_long, file.path(OUTPUT_DIR, "data/Cov_df2_long_ForPlotting.qs"))
 
-Cov_df_long <- qread("output/data/Cov_df_long_ForPlotting.qs")
-Cov_df2_long <- qread("output/data/Cov_df2_long_ForPlotting.qs")
+Cov_df_long <- qread(file.path(OUTPUT_DIR, "data/Cov_df_long_ForPlotting.qs"))
+Cov_df2_long <- qread(file.path(OUTPUT_DIR, "data/Cov_df2_long_ForPlotting.qs"))
 
 # unique(Cov_df_long[,1])
-# write.csv(unique(Cov_df_long[,1]), "output/data/Covariate_List.csv")
+# write.csv(unique(Cov_df_long[,1]), file.path(OUTPUT_DIR, "data/Covariate_List.csv")
 
 Cov_plot <- ggplot() +
   geom_tile(data = Cov_df_long, aes(x = kmr, y = Covariate, fill = Cof_PModel), color = "grey80")+
@@ -111,7 +116,7 @@ Cov_plot <- ggplot() +
         axis.title.y=element_blank())
 Cov_plot
 
-ggsave("output/figures/Cov_plot.png", Cov_plot, width = 16, height = 17.5, dpi = 300)
+ggsave(filename = file.path(OUTPUT_DIR, "figures/Cov_plot.png"), plot = Cov_plot, width = 16, height = 17.5, dpi = 300)
 
 
 # Extract numbers for results  -----
@@ -274,7 +279,7 @@ Cov_sum_plot <- ggarrange(Cov_sum_Ag_plot+rremove("xlab")+rremove("ylab"),
 Cov_sum_plot <- annotate_figure(Cov_sum_plot, bottom = text_grob("Number of times covariate selected"))
 Cov_sum_plot
 ## export barplot
-ggsave("output/figures/Cov_sum_plot.png", Cov_sum_plot2, width = 11, height = 6, dpi = 300, bg = "white")
+ggsave(filename = file.path(OUTPUT_DIR, "figures/Cov_sum_plot.png"), Cov_sum_plot2, width = 11, height = 6, dpi = 300, bg = "white")
 
 ## Barplot to show positive and negatively associated covariates. (Not used)
 
@@ -371,7 +376,7 @@ Cov_sum_Ag2_plot <- ggplot(data = Cov_df_sum_Ag2, aes(x = reorder(Covariate, -Co
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
         axis.title.x=element_blank(),
         plot.title = element_text(hjust=0.9 , vjust = -10))
-ggsave("output/figures/Cov_sum_Ag2_plot.png", Cov_sum_Ag2_plot, width = 11, height = 11, dpi = 300, bg = "white")
+ggsave(filename = file.path(OUTPUT_DIR , "figures/Cov_sum_Ag2_plot.png"), Cov_sum_Ag2_plot, width = 11, height = 11, dpi = 300, bg = "white")
   
 Cov_sum_Ag_plot <- ggplot(data = Cov_df_sum_Ag %>% 
                             dplyr::select(Covariate, Cof_PModel_Ag_pos, Cof_PModel_Ag_neg, Cof_NModel_Ag_pos,Cof_PModel_Ag_neg) %>% 
@@ -389,7 +394,7 @@ Cov_sum_Ag_plot
 
 # Combined tile and bar plot ----
 ## Prepare data ----
-Cov_df <- qread("output/data/Cov_df.qs") %>% 
+Cov_df <- qread(file.path(OUTPUT_DIR, "data/Cov_df.qs")) %>% 
   mutate(Covariate = case_when(Covariate  == "AgProf" ~ "Agricultural profit",
                                Covariate  == "Area" ~ "Property Size",
                                Covariate  == "DistCity" ~ "Distance to urban center",
@@ -467,7 +472,7 @@ Bar_plot <- ggplot(data = Cov_df_Ag_sum, aes(x = Cof_total, y = Covariate)) +
 Bar_plot
 TileBar_plot_Ag <- Tile_plot + Bar_plot + plot_layout(width = c(5,3.5))
 TileBar_plot_Ag
-ggsave("output/figures/TileBar_plot_Ag.png", TileBar_plot_Ag, width = 11, height = 8, dpi = 300, bg = "white")
+ggsave(file.path(OUTPUT_DIR, "figures/TileBar_plot_Ag.png"), TileBar_plot_Ag, width = 11, height = 8, dpi = 300, bg = "white")
 
 ## Forestry ----
 Cov_df_Fo <- Cov_df %>% 
@@ -509,7 +514,7 @@ Bar_plot <- ggplot(data = Cov_df_Fo_sum, aes(x = Cof_total, y = Covariate)) +
         axis.text.y = element_blank())
 Bar_plot
 TileBar_plot_Fo <- Tile_plot + Bar_plot + plot_layout(width = c(5,3.5))
-ggsave("output/figures/TileBar_plot_Fo.png", TileBar_plot_Fo, width = 11, height = 8, dpi = 300, bg = "white")
+ggsave(filename = file.path(OUTPUT_DIR , "figures/TileBar_plot_Fo.png"), TileBar_plot_Fo, width = 11, height = 8, dpi = 300, bg = "white")
 
 ## Infrastructure ----
 Cov_df_In <- Cov_df %>% 
@@ -551,12 +556,12 @@ Bar_plot <- ggplot(data = Cov_df_In_sum, aes(x = Cof_total, y = Covariate)) +
         axis.text.y = element_blank())
 Bar_plot
 TileBar_plot_In <- Tile_plot + Bar_plot + plot_layout(width = c(5,3.5))
-ggsave("output/figures/TileBar_plot_In.png", TileBar_plot_In, width = 11, height = 8, dpi = 300, bg = "white")
+ggsave(filename = file.path(OUTPUT_DIR, "figures/TileBar_plot_In.png"), TileBar_plot_In, width = 11, height = 8, dpi = 300, bg = "white")
 
 # Plot map----
 ## Map for study area (KMR) ----
 # Load spatial units for defining the study area 
-SUs_Ag <- qread("output/spatial_units/SUs_Ag.qs")
+SUs_Ag <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"))
 
 # Load ABS urban areas shapefile
 ABS_urb <- st_read("D:/Data/NSW_Deforestation/risk-model-covariates/Input/2016_UCL_shape/UCL_2016_AUST.shp") %>% 
@@ -617,14 +622,14 @@ KMR_map <- ggplot()+
            expand = FALSE)
 
 # Export KMR map
-ggsave("output/figures/KMR_map.png", KMR_map, width = 11, height = 11, dpi = 300)
+ggsave(file.path(OUTPUT_DIR, "figures/KMR_map.png"), KMR_map, width = 11, height = 11, dpi = 300)
 
 ## Deforestation risk maps----
 ### load base layers and target data  layers
 #### Data Layers
-Pred_Ag <- qread("output/predictions/Pred_Ag.qs")
-Pred_Fo <- qread("output/predictions/Pred_Fo.qs")
-Pred_In <- qread("output/predictions/Pred_In.qs")
+Pred_Ag <- qread(file.path(OUTPUT_DIR, "predictions/Pred_Ag.qs"))
+Pred_Fo <- qread(file.path(OUTPUT_DIR, "predictions/Pred_Fo.qs"))
+Pred_In <- qread(file.path(OUTPUT_DIR, "predictions/Pred_In.qs"))
 
 #### Base Layers
 KMR_shp <- st_read("input/spatial_units/biodiversity_nsw_koala_modelling_regions_v1p1/NSW_Koala_Modelling_Regions_v1.1.shp")
@@ -652,28 +657,31 @@ NSW_urb_sel_pt <- ABS_urb %>%
   mutate(x = st_coordinates(.)[,1], y = st_coordinates(.)[,2])
 
 #### File names
-FilenamePath_PNG_Ag <- "output/figures/Pred_Ag_map1.png"
-FilenamePath_PNG_Fo <- "output/figures/Pred_Fo_map1.png"
-FilenamePath_PNG_In <- "output/figures/Pred_In_map1.png"
+FilenamePath_PNG_Ag <- file.path(OUTPUT_DIR, "figures/Pred_Ag_map1.png")
+FilenamePath_PNG_Fo <- file.path(OUTPUT_DIR, "figures/Pred_Fo_map1.png")
+FilenamePath_PNG_In <- file.path(OUTPUT_DIR, "figures/Pred_In_map1.png")
 
-PLOTMAP_risk_NSW(DATA = Pred_Ag, FILL = PredAll, LEGEND_Title = "Deforestation\nrisk", ClearType = 1, FilenamePath_PNG = "output/figures/Pred_Ag_map1.png")
-PLOTMAP_risk_NSW(DATA = Pred_Fo, FILL = PredAll, LEGEND_Title = "Deforestation\nrisk", ClearType = 2, FilenamePath_PNG = "output/figures/Pred_Fo_map1.png")
-PLOTMAP_risk_NSW(DATA = Pred_In, FILL = PredAll, LEGEND_Title = "Deforestation\nrisk", ClearType = 3, FilenamePath_PNG = "output/figures/Pred_In_map1.png")
+PLOTMAP_risk_NSW(DATA = Pred_Ag, FILL = PredAll, LEGEND_Title = "Deforestation\nrisk", ClearType = 1, FilenamePath_PNG = file.path(OUTPUT_DIR, "figures/Pred_Ag_map1.png"))
+PLOTMAP_risk_NSW(DATA = Pred_Fo, FILL = PredAll, LEGEND_Title = "Deforestation\nrisk", ClearType = 2, FilenamePath_PNG = file.path(OUTPUT_DIR, "figures/Pred_Fo_map1.png"))
+PLOTMAP_risk_NSW(DATA = Pred_In, FILL = PredAll, LEGEND_Title = "Deforestation\nrisk", ClearType = 3, FilenamePath_PNG = file.path(OUTPUT_DIR, "figures/Pred_In_map1.png"))
 
 
 ## Koala habitat deforestation risk maps----
 ### load base layers and target data layers
 #### Data Layers
-Khab_risk_Ag <- qread("output/predictions/Khab_risk_Ag.qs")
-Khab_risk_Fo <- qread("output/predictions/Khab_risk_Fo.qs")
-Khab_risk_In <- qread("output/predictions/Khab_risk_In.qs")
+Khab_risk_Ag <- qread(file.path(OUTPUT_DIR, "predictions/Khab_risk_Ag.qs"))
+Khab_risk_Fo <- qread(file.path(OUTPUT_DIR, "predictions/Khab_risk_Fo.qs"))
+Khab_risk_In <- qread(file.path(OUTPUT_DIR, "predictions/Khab_risk_In.qs"))
 
 #### Base Layers
-KMR_shp <- st_read("input/spatial_units/biodiversity_nsw_koala_modelling_regions_v1p1/NSW_Koala_Modelling_Regions_v1.1.shp")
+KMR_shp <- st_read(file.path(INPUT_DIR, "spatial_units/biodiversity_nsw_koala_modelling_regions_v1p1/NSW_Koala_Modelling_Regions_v1.1.shp"))
+
+## Data Source: https://www.abs.gov.au/AUSSTATS/abs@.nsf/DetailsPage/1270.0.55.004July%202016?OpenDocument
 
 ABS_urb <- st_read("D:/Data/NSW_Deforestation/risk-model-covariates/Input/2016_UCL_shape/UCL_2016_AUST.shp") %>% 
   st_transform(st_crs(Khab_risk_Ag))
 
+## Data source https://www.abs.gov.au/AUSSTATS/abs@.nsf/DetailsPage/1270.0.55.001July%202016?OpenDocument
 STE <- st_read("D:/Data/NSW_Deforestation/risk-model-covariates/Input/2016_STE_shape/STE_2016_AUST.shp") %>% 
   st_transform(st_crs(Khab_risk_Ag)) %>% 
   st_crop(KMR_shp)
@@ -711,9 +719,9 @@ Inset_BL_In <- data.frame(x = c(9599470, 9660498, 9769700), y = c(4352856, 44778
 Inset_BL_Fo <- data.frame(x = c(9779110, 9503821, 9327460), y = c(4903177, 4379838, 4196286))
 
 #### File names
-FilenamePath_PNG_Ag <- "output/figures/Khab_risk_Ag_map1.png"
-FilenamePath_PNG_Fo <- "output/figures/Khab_risk_Fo_map1.png"
-FilenamePath_PNG_In <- "output/figures/Khab_risk_In_map1.png"
+FilenamePath_PNG_Ag <- file.path(OUTPUT_DIR, "figures/Khab_risk_Ag_map1.png")
+FilenamePath_PNG_Fo <- file.path(OUTPUT_DIR, "figures/Khab_risk_Fo_map1.png")
+FilenamePath_PNG_In <- file.path(OUTPUT_DIR, "figures/Khab_risk_In_map1.png")
 
 
 Ag_risk_with_Insets<- PLOTMAP_risk_with_Insets(DATA = Khab_risk_Ag, FILL = KhabRisk , LEGEND_Title = "Koala habitat\nloss risk", ClearType = 1, 
@@ -771,9 +779,9 @@ sum(Pred_In_all_result$RemWoodyHa[Pred_In_all_result$PredAll > 0.1], na.rm = TRU
 nrow(Pred_In_all_result[Pred_In_all_result$PredAll > 0.1,])
 
 ## High-quality koala habitat clearing risk ----
-Khab_risk_Ag <- qread("output/predictions/Khab_risk_Ag.qs")
-Khab_risk_Fo <- qread("output/predictions/Khab_risk_Fo.qs")
-Khab_risk_In <- qread("output/predictions/Khab_risk_In.qs")
+Khab_risk_Ag <- qread(file.path(OUTPUT_DIR, "predictions/Khab_risk_Ag.qs"))
+Khab_risk_Fo <- qread(file.path(OUTPUT_DIR, "predictions/Khab_risk_Fo.qs"))
+Khab_risk_In <- qread(file.path(OUTPUT_DIR, "predictions/Khab_risk_In.qs"))
 
 Khab_risk_Ag_all_result <- do.call(rbind, Khab_risk_Ag) %>% 
   mutate(Area = as.numeric(st_area(.)/1e4),
