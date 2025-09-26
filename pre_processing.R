@@ -12,8 +12,10 @@ library(raster)
 library(exactextractr)
 library(terra)
 library(tidyverse)
+library(furrr)
 library(spdep)
 library(readxl)
+options("max.print" = 999)
 library(qs)
 
 # load functions
@@ -21,8 +23,8 @@ source("functions.R")
 
 ## Set directory
 ## Note: change the path to the input and output directory
-INPUT_DIR <- file.path("R:/HABCLEAR22-Q5221/risk-model/input")
-OUTPUT_DIR <- file.path("R:/HABCLEAR22-Q5221/risk-model/output")
+INPUT_DIR <- file.path("D:/Data/NSW_Deforestation/risk-model/input")
+OUTPUT_DIR <- file.path("D:/Data/NSW_Deforestation/risk-model/output")
 
 # load spatial property units for each KMR
 SUs <- list(CC = st_read(file.path(INPUT_DIR, "spatial_units/lots_kmrs.gdb"), layer = "Central_Coast"),
@@ -35,14 +37,15 @@ SUs <- list(CC = st_read(file.path(INPUT_DIR, "spatial_units/lots_kmrs.gdb"), la
             R = st_read(file.path(INPUT_DIR, "spatial_units/lots_kmrs.gdb"), layer = "Riverina"),
             SC = st_read(file.path(INPUT_DIR, "spatial_units/lots_kmrs.gdb"), layer = "South_Coast"))
 
-# add area to the spatial units attribute table
-for (i in names(SUs)) {
-  SUs[[i]]$Shape_Area <- as.numeric(st_area(SUs[[i]]))
-  SUs[[i]]$Area = SUs[[i]]$Shape_Area / 1e4
-}
+# add area and ID to the spatial units attribute table
+SUs <- imap(SUs, ~.x %>% mutate(Area = as.numeric(st_area(.)/ 1e4),
+                                SUID = 1:n()) %>% 
+                                select(KMR, SA1, SUID, Area))
+  
+
 
 # Check for Shape_Area < 0 
-do.call(rbind, SUs) %>% filter(Shape_Area < 0)
+do.call(rbind, SUs) %>% filter(Area < 0)
 
 # save processes spatial units
 saveRDS(SUs, file = file.path(OUTPUT_DIR, "spatial_units/sus.rds"))
@@ -112,48 +115,29 @@ ZStats_Woody_all %>% filter(sum.woody < sum.Khab)
 rm(list = setdiff(ls(all.names = TRUE), "SUs"))
 gc()
 
-# Produce Woody loss vector ----
-SUs <- readRDS(file.path(OUTPUT_DIR, "spatial_units/sus.rds"))
-ZStats_Woody <- readRDS(file.path(OUTPUT_DIR, "data/ZStats_Woody.rds"))
-SUs_Woody <- list()
-for (i in 1:length(names(ZStats_Woody))){
-  SUs_Woody[[i]] <- bind_cols(SUs[[i]], ZStats_Woody[[i]])
-}
-SUs_Woody <- do.call(rbind, SUs_Woody)
-
-saveRDS(SUs_Woody, file = file.path(OUTPUT_DIR, "data/SUs_Woody.rds"))
-
-# Preprocess covariates ----
-
 ## Continuous covariate ---- 
 SUs <- qread(file.path(OUTPUT_DIR, "spatial_units/sus.qs"))
 
-# Load proposed covariates based on workshops from lookup xlsx
-CovLookup <- readxl::read_xlsx(file.path(INPUT_DIR, "covariates/covariate_description.xlsx"), sheet = "AllLyr")
+# # Load proposed covariates based on workshops from lookup xlsx
+# CovLookup <- readxl::read_xlsx(file.path(INPUT_DIR, "covariates/covariate_description.xlsx"), sheet = "AllLyr")
 
 # load covariates
-Cov_file_bn <- tools::file_path_sans_ext(basename(list.files(file.path(INPUT_DIR, "covariates"), pattern = "\\.tif$", full.names = TRUE)))
-for(i in 1:nrow(CovLookup)){
-  if (CovLookup$`Covariate Code`[i] %in% Cov_file_bn){
-    print(paste0("Load ... ", CovLookup$Type[i] ," ... ", CovLookup$`Covariate Code`[i], " = ",  CovLookup$`Covariate Description`[i]))
-    assign(CovLookup$`Covariate Code`[i], terra::rast(paste0(file.path(INPUT_DIR, "covariates/"), CovLookup$`Covariate Code`[i], ".tif")))
-  }
-}
-
-# create raster stack of continuous covariates
-StackCovsC <- terra::rast(list(PopDen16, PopGro16, SocioEcon16_PC, DistRoad, DistCity, prop_value, AgProf, TSoilPC, elev, slope, prec, temp , EcolCond))
+CovsC <- c("PopDen16", "PopGro16", "SocioEcon16_PC", "DistRoad", "DistCity", "prop_value", "AgProf", "TSoilPC", "elev", "slope", "prec", "temp" , "EcolCond")
+CovsC_FPath <- file.path(INPUT_DIR, "covariates", paste0(CovsC, ".tif"))
+StackCovsC <- rast(CovsC_FPath)
 names(StackCovsC)[c(2, 10, 11, 15, 17, 18)] <- c("PopGro", "PropVal", "AgProf", "Elev", "Precip", "Temp")
+names(StackCovsC)
 
-# save raster stack
+# # save raster stack
 saveRDS(StackCovsC, file = file.path(OUTPUT_DIR, "raster_stacks/cont_covs.rds"))
 
 # crop continuous covariate rasters by spatial units for each KMR
 CropRastCovsC <- map(.x = SUs, .f = get_crop, Raster = StackCovsC)
 
 # Clear memory space and hard drive space before extracting continuous covariates
-rm(list = setdiff(ls(all.names = TRUE), c(ls(all.names = TRUE)[sapply(ls(all.names = TRUE), function(x) is.function(get(x)))], "SUs", "CropRastCovsC")))
+# rm(list = setdiff(ls(all.names = TRUE), c(ls(all.names = TRUE)[sapply(ls(all.names = TRUE), function(x) is.function(get(x)))], "SUs", "CropRastCovsC")))
 # tmpFiles(current=TRUE, orphan=TRUE, old=TRUE, remove=FALSE)
-gc()
+# gc()
 
 # get continuous covariate values
 ZStats_CovsC <- map2(.x = SUs, .y = CropRastCovsC, .f = get_zonal2, Stat = "mean")
@@ -161,6 +145,7 @@ ZStats_CovsC <- map2(.x = SUs, .y = CropRastCovsC, .f = get_zonal2, Stat = "mean
 # remove "mean" label from continuous covariates names
 for (i in names(ZStats_CovsC)) {
   names(ZStats_CovsC[[i]]) <- names(ZStats_CovsC[[i]]) %>% str_remove("mean.")
+  ZStats_CovsC[[i]]$Area <- SUs[[i]]$Area # add area to the data frame
 }
 
 # save data
@@ -168,32 +153,30 @@ saveRDS(ZStats_CovsC, file = file.path(OUTPUT_DIR, "data/ZStats_CovsC.rds"))
 qsave(ZStats_CovsC, file = file.path(OUTPUT_DIR, "data/ZStats_CovsC.qs"), preset = "fast")
 
 # Clearing stroage and memory space before processing Discrete variables.
-rm(list = ls(all.names = TRUE)) #will clear all objects includes hidden objects.
+# rm(list = ls(all.names = TRUE)) #will clear all objects includes hidden objects.
 # tmpFiles(current=TRUE, orphan=TRUE, old=TRUE, remove=TRUE)
-gc()
+# gc()
 
 ## Discrete covariate ---- 
 # load functions
 source("functions.R")
-SUs <- readRDS(file.path(OUTPUT_DIR, "spatial_units/sus.rds"))
+SUs <- qread(file.path(OUTPUT_DIR, "spatial_units/sus.qs"))
+# SUs <- readRDS(file.path(OUTPUT_DIR, "spatial_units/sus.rds"))
 # Load proposed covariates based on workshops from lookup xlsx
-CovLookup <- readxl::read_xlsx(file.path(INPUT_DIR, "covariates/covariate_description.xlsx"), sheet = "AllLyr")
 
-# load covariates
-Cov_file_bn <- tools::file_path_sans_ext(basename(list.files(file.path(INPUT_DIR, "covariates"), pattern = "\\.tif$", full.names = TRUE)))
-for(i in 1:nrow(CovLookup)){
-  if (CovLookup$`Covariate Code`[i] %in% Cov_file_bn){
-    print(paste0("Load ... ", CovLookup$Type[i] ," ... ", CovLookup$`Covariate Code`[i], " = ",  CovLookup$`Covariate Description`[i]))
-    assign(CovLookup$`Covariate Code`[i], terra::rast(paste0(file.path(INPUT_DIR, "covariates/"), CovLookup$`Covariate Code`[i], ".tif")))
-  }
-}    
-
-# Manually read in  raster discrete covariates (Use this method to read in layers if the for-loop does not work or to read in additional layers)
-Remoteness <- rast(file.path(INPUT_DIR, "covariates/remote2016.tif"))
+# # Manually read in  raster discrete covariates (Use this method to read in layers if the for-loop does not work or to read in additional layers)
+# Remoteness <- rast(file.path(INPUT_DIR, "covariates/remote2016.tif"))
 
 # create raster stack of discrete covariates
-StackCovsD <- terra::rast(list(PolPref , LandTen, NSW_forten18_ForTen, NSW_forten18_TenType, NSW_forten18_ForType, NatVegReg = NatVegReg , PlanZone, LandUse, drought , Fire  , Remoteness ))
+CovsD <- c("PolPref", "NSW_LandTenure", "NSW_forten18_ForTen", "NSW_forten18_TenType", "NSW_forten18_ForType", "NatVegReg", "PlanZone", "LandUse", "Drought", "Fire", "remote2016")
+CovsD_FPath <- file.path(INPUT_DIR, "covariates", paste0(CovsD, ".tif"))
+StackCovsD <- rast(CovsD_FPath)
+names(StackCovsD)[6] <- "NatVegReg"
 names(StackCovsD)
+plot(StackCovsD$Drought)
+plot(StackCovsD$Fire)
+plot(StackCovsD$LandTen)
+
 # save raster stack
 saveRDS(StackCovsD, file = file.path(OUTPUT_DIR, "raster_stacks/disc_covs.rds"))
 
@@ -201,7 +184,7 @@ saveRDS(StackCovsD, file = file.path(OUTPUT_DIR, "raster_stacks/disc_covs.rds"))
 CropRastCovsD <- map(.x = SUs, .f = get_crop, Raster = StackCovsD)
 
 # get discrete covariate values
-ZStats_CovsD <- map2(.x = SUs, .y = CropRastCovsD, .f = get_zonal, Stat = "mode") # note here could use Stat = "frac" to get the fraction of each discrete type in each property
+ZStats_CovsD <- map2(.x = SUs, .y = CropRastCovsD, .f = get_zonal2, Stat = "mode") # note here could use Stat = "frac" to get the fraction of each discrete type in each property
 
 # remove "mode" label from discrete covariates names and covert to factors
 for (i in names(ZStats_CovsD)) {
@@ -212,4 +195,3 @@ for (i in names(ZStats_CovsD)) {
 # save data
 saveRDS(ZStats_CovsD, file = file.path(OUTPUT_DIR, "data/ZStats_CovsD.rds"))
 qsave(ZStats_CovsD, file = file.path(OUTPUT_DIR, "data/ZStats_CovsD.qs"), preset = "fast")
-
