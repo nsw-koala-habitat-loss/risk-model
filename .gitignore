@@ -45,3 +45,9 @@ output/
 # PyCharm configuration files
 .idea/
 .Rproj.user
+
+# do not commit SLURM folder. Not needed for the project
+SLURM/
+
+# do not commit the R package folder. Not needed for the project
+R/
