@@ -18,13 +18,12 @@ if(!require("qs")) install.packages("qs")
 library(qs)
 library(furrr)
 library(ltm)
-options(max.print = 999)
+options(max.print = 100)
 
 # load functions
 source("functions.R")
 
 ## Note: change the path to the input and output directory
-
 INPUT_DIR <- file.path("D:/Data/NSW_Deforestation/risk-model/input")
 OUTPUT_DIR <- file.path("D:/Data/NSW_Deforestation/risk-model/output")
 
@@ -66,6 +65,7 @@ ZStats_Covs <- list()
 for (i in 1:length(names(ZStats_CovsC))) {
   ZStats_Covs[[i]] <- bind_cols(ZStats_CovsC[[i]], ZStats_CovsD[[i]])
 }
+
 names(ZStats_Covs) <- names(ZStats_CovsC)
 qsave(ZStats_Covs, file = file.path(OUTPUT_DIR, "data/ZStats_Covs.qs"), preset = "fast")
 
@@ -76,10 +76,13 @@ qsave(ZStats_Covs, file = file.path(OUTPUT_DIR, "data/ZStats_Covs.qs"), preset =
 ## Continuous Covariates ----
 ZStats_CovsC_all <- do.call(rbind, ZStats_CovsC)
 Corr_Cont <- cor(ZStats_CovsC_all, use = "complete.obs")
+qsave(Corr_Cont, file = file.path(OUTPUT_DIR, "collinearity/Corr_Cont_matrix.qs"))
+
 Corr_Cont_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = Corr_Cont, label = TRUE, hjust = 1, layout.exp = 2)+ 
   geom_point(size = 10, aes(color = coefficient > 0, alpha = abs(coefficient)> 0.5))+  ## highlight variables with correlations  > 0.5 OR < -0.5
   scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) + 
   guides(color = "none", alpha = "none")
+
 # Export correlation plot
 ggsave(Corr_Cont_all_plot, file = file.path(OUTPUT_DIR, "collinearity/Corr_Cont_all_plot.png"), width = 2000, height = 2000, units = "px")
 
@@ -95,10 +98,12 @@ for (i in 1:ncol(ZStats_CovsD_all)) {
     cramers_v_matrix[i,j] <- cramersv_val
   }
 }
+qsave(cramers_v_matrix, file = file.path(OUTPUT_DIR, "collinearity/CramersV_matrix.qs"))
 Corr_Categ_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = cramers_v_matrix, label = TRUE, hjust = 1, layout.exp = 2)+ 
   geom_point(size = 10, aes(color = coefficient > 0, alpha = abs(coefficient)> 0.5))+   ## highlight variables with correlations  > 0.5 OR < -0.5
   scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) + 
   guides(color = "none", alpha = "none")
+
 # Export correlation plot
 ggsave(Corr_Categ_all_plot, file = file.path(OUTPUT_DIR, "collinearity/Corr_Categ_all_plot.png"), width = 2000, height = 2000, units = "px")
 
@@ -500,8 +505,8 @@ ptm <- proc.time()
 for(kmr in KMRs){
   tic(paste0(kmr))
   cat(paste0("Running full model for: ", kmr, "\n"))
-  for(i in 1:5){
-    Model_Ag <- fit_model2(KMR = kmr, ClearType = 1, SpatUnits = SUs_Ag, RespData = ZStats_Woody_Ag, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
+  for(i in 1:10){
+    Model_Ag <- fit_model(KMR = kmr, ClearType = 1, SpatUnits = SUs_Ag, RespData = ZStats_Woody_Ag, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
     print(paste0(kmr, ":  DIC= " , round(Model_Ag$PModel$dic$dic + Model_Ag$NModel$dic$dic, 2)))
   }
   toc(log = TRUE)
@@ -520,8 +525,8 @@ ptm <- proc.time()
 for(kmr in KMRs){
   tic(paste0(kmr))
   cat(paste0("Running full model for: ", kmr, "\n"))
-  for(i in 1:5){
-    Model_Fo <- fit_model2(KMR = kmr, ClearType = 3, SpatUnits = SUs_Fo, RespData = ZStats_Woody_Fo, CovsCD = ZStats_Covs_Fo, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
+  for(i in 1:10){
+    Model_Fo <- fit_model(KMR = kmr, ClearType = 3, SpatUnits = SUs_Fo, RespData = ZStats_Woody_Fo, CovsCD = ZStats_Covs_Fo, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
     print(paste0(kmr, ":  DIC= " , round(Model_Fo$PModel$dic$dic + Model_Fo$NModel$dic$dic, 2)))
   }
   toc(log = TRUE)
@@ -542,8 +547,8 @@ ptm <- proc.time()
 for(kmr in KMRs){
   tic(paste0(kmr))
   cat(paste0("Running full model for: ", kmr, "\n"))
-  for(i in 1:5){
-    Model_In <- fit_model2(KMR = kmr, ClearType = 2, SpatUnits = SUs_In, RespData = ZStats_Woody_In, CovsCD = ZStats_Covs_In, SA1sPoly = SA1s, Verbose = FALSE, N_rerun = 1, N_retry=5, Initial_Tlimit = 1000, OutputDir = NULL)
+  for(i in 1:510){
+    Model_In <- fit_model(KMR = kmr, ClearType = 2, SpatUnits = SUs_In, RespData = ZStats_Woody_In, CovsCD = ZStats_Covs_In, SA1sPoly = SA1s, Verbose = FALSE, N_rerun = 1, N_retry=5, Initial_Tlimit = 1000, OutputDir = NULL)
     print(paste0(kmr, ":  DIC= " , round(Model_In$PModel$dic$dic + Model_In$NModel$dic$dic, 2)))
   }
   toc(log = TRUE)
@@ -559,7 +564,7 @@ proc.time() - ptm
 kmr <- "SC"
 
 for(i in 1:20){
-  Model_In <- fit_model3(KMR = kmr , ClearType = 2, SpatUnits = SUs_In, RespData = ZStats_Woody_In, CovsCD = ZStats_Covs_In, SA1sPoly = SA1s, 
+  Model_In <- fit_model2(KMR = kmr , ClearType = 2, SpatUnits = SUs_In, RespData = ZStats_Woody_In, CovsCD = ZStats_Covs_In, SA1sPoly = SA1s, 
                          Verbose = FALSE, N_rerun=2 , N_retry=4, NMod_TOLN = 1e-14, Initial_Tlimit = 1000, OutputDir = NULL)
   cat(paste0(kmr, ":  DIC= " , round(Model_In$PModel$dic$dic + Model_In$NModel$dic$dic, 2), "\n"))
   cat(paste0("PModel dMLIK = ", abs(Model_In$PModel$mlik[1,1] - Model_In$PModel$mlik[2,1]), "\n"))
@@ -685,6 +690,8 @@ Select_model2(KMR = kmr, ClearType = 2, SpatUnits = SUs_In,
                Initial_Tlimit = 1000, OutputDir = file.path(OUTPUT_DIR, "models/"))
 toc(log = TRUE)
 
+1e-13
+
 #### Backward model selection
 tic("Select_model: In backward selection")
 Select_model2(KMR = kmr, ClearType = 2, SpatUnits = SUs_In, 
@@ -718,12 +725,11 @@ for(ClrTyp in ClrTyps){
       cat(ClrTyp, kmr, " Backward selection error: ", "\n")
       print(SelModel_BC$ERROR_ls)
       cat("\n\n")}
-  }}
-
+  }
+}
 
 ### Compare DIC values for Forward complete and backward complete model selection ----
 ## Also verify the minimum DIC values recorded in the model selection steps (WHILE LOOP) and the final selected model  
-
 SUs_Ag <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"))
 KMRs <- names(SUs_Ag)
 rm(SUs_Ag)
@@ -798,7 +804,7 @@ ZStats_Woody_Ag <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs"))
 ZStats_Covs_Ag <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_Ag.qs"))
 KMRs <- names(ZStats_Covs_Ag)
 kmr <- KMRs[1]
-Model_Ag <- fit_model2(KMR = kmr, ClearType = 1, SpatUnits = SUs_Ag, RespData = ZStats_Woody_Ag, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
+Model_Ag <- fit_model(KMR = kmr, ClearType = 1, SpatUnits = SUs_Ag, RespData = ZStats_Woody_Ag, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
 Cov_ls_Ag <- summary(Model_Ag$PModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>% dplyr::select(Covariate)
 
 for (kmr in KMRs){
@@ -834,19 +840,19 @@ for (kmr in KMRs){
   Cov_ls_Ag <- left_join(Cov_ls_Ag, Cov_cof, by  = join_by("Covariate" == "Cov"))
 }
 
-# Prepare the table for the selected model
-Cov_ls_Ag_tab <- Cov_ls_Ag %>% filter_all(any_vars(!is.na(.))) %>%
-  mutate(Variable = c("(Intercept)", "Population density", "Socio-Economic PC1", "Socio-Economic PC2", "Socio-Economic PC3", "Socio-Economic PC4",  "Socio-Economic PC5", 
-                      "Distance to road", "Distance to urban centre", "Property value", "Agricultural profit", "Soil PC1", "Soil PC2", "Soil PC3", 
-                      "Slope", "Rainfall", "Temperature", "Ecological condition", "Property size",
-                      "Land use regulations", "Land use type1", "Land use type2", "Land use type3", "Land use type4", "Drought", "Fire")) %>% 
-  dplyr::select(Variable, everything()) %>% 
-  dplyr::select(-Covariate) %>% 
-  arrange(Variable) %>% 
-  filter(Variable != "Land use type5",
-         !(is.na(CC) & is.na(CST) & is.na(DRP) & is.na(FW) & is.na(NC) & is.na(NT) & is.na(NS) & is.na(R) & is.na(SC) ))
-# Export the table
-write.csv(Cov_ls_Ag_tab, file.path(OUTPUT_DIR, "models/Cov_ls_Ag.csv"), row.names = FALSE, na = "")
+# # Prepare the table for the selected model
+# Cov_ls_Ag_tab <- Cov_ls_Ag %>% filter_all(any_vars(!is.na(.))) %>%
+#   mutate(Variable = c("(Intercept)", "Population density", "Socio-Economic PC1", "Socio-Economic PC2", "Socio-Economic PC3", "Socio-Economic PC4",  "Socio-Economic PC5", 
+#                       "Distance to road", "Distance to urban centre", "Property value", "Agricultural profit", "Soil PC1", "Soil PC2", "Soil PC3", 
+#                       "Slope", "Rainfall", "Temperature", "Ecological condition", "Property size",
+#                       "Land use regulations", "Land use type1", "Land use type2", "Land use type3", "Land use type4", "Drought", "Fire")) %>% 
+#   dplyr::select(Variable, everything()) %>% 
+#   dplyr::select(-Covariate) %>% 
+#   arrange(Variable) %>% 
+#   filter(Variable != "Land use type5",
+#          !(is.na(CC) & is.na(CST) & is.na(DRP) & is.na(FW) & is.na(NC) & is.na(NT) & is.na(NS) & is.na(R) & is.na(SC) ))
+# # Export the table
+# write.csv(Cov_ls_Ag_tab, file.path(OUTPUT_DIR, "models/Cov_ls_Ag.csv"), row.names = FALSE, na = "")
 
 ### Forestry ----
 SUs_Fo <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_Fo.qs"))
@@ -856,7 +862,7 @@ ZStats_Woody_Fo <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs"))
 ZStats_Covs_Fo <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_Fo.qs"))
 KMRs <- names(ZStats_Covs_Fo)
 kmr <- KMRs[1]
-Model_Fo <- fit_model2(KMR = kmr, ClearType = 3, SpatUnits = SUs_Fo, RespData = ZStats_Woody_Fo, CovsCD = ZStats_Covs_Fo, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
+Model_Fo <- fit_model(KMR = kmr, ClearType = 3, SpatUnits = SUs_Fo, RespData = ZStats_Woody_Fo, CovsCD = ZStats_Covs_Fo, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
 Cov_ls_Fo <- summary(Model_Fo$PModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>% dplyr::select(Covariate)
 
 for (kmr in KMRs){
@@ -892,18 +898,18 @@ for (kmr in KMRs){
   Cov_ls_Fo <- left_join(Cov_ls_Fo, Cov_cof, by  = join_by("Covariate" == "Cov"))
 }
 
-Cov_ls_tab <- Cov_ls_Fo %>% 
-  mutate(Variable = c("(Intercept)", "Population density", "Socio-Economic PC1", "Socio-Economic PC2", "Socio-Economic PC3", "Socio-Economic PC4",  "Socio-Economic PC5", 
-                      "Distance to road", "Distance to urban centre", "Property value", "Agricultural profit", "Soil PC1", "Soil PC2", "Soil PC3", 
-                      "Slope", "Rainfall", "Temperature", "Ecological condition", "Property size", "Land use regulations",
-                      "Land use type1", "Land use type2", "Land use type3", "Land use type4", "Drought", "Fire")) %>%
-  dplyr::select(Variable, everything()) %>%
-  dplyr::select(-Covariate) %>%
-  arrange(Variable) %>%
-  filter(Variable != "Land use type5",
-         !(is.na(CC) & is.na(CST) & is.na(DRP) & is.na(FW) & is.na(NC) & is.na(NT) & is.na(NS) & is.na(R) & is.na(SC) ))
-Cov_ls_tab
-write.csv(Cov_ls_tab, file.path(OUTPUT_DIR, "models/Cov_ls_Fo.csv"), row.names = FALSE, na = "")
+# Cov_ls_tab <- Cov_ls_Fo %>% 
+#   mutate(Variable = c("(Intercept)", "Population density", "Socio-Economic PC1", "Socio-Economic PC2", "Socio-Economic PC3", "Socio-Economic PC4",  "Socio-Economic PC5", 
+#                       "Distance to road", "Distance to urban centre", "Property value", "Agricultural profit", "Soil PC1", "Soil PC2", "Soil PC3", 
+#                       "Slope", "Rainfall", "Temperature", "Ecological condition", "Property size", "Land use regulations",
+#                       "Land use type1", "Land use type2", "Land use type3", "Land use type4", "Drought", "Fire")) %>%
+#   dplyr::select(Variable, everything()) %>%
+#   dplyr::select(-Covariate) %>%
+#   arrange(Variable) %>%
+#   filter(Variable != "Land use type5",
+#          !(is.na(CC) & is.na(CST) & is.na(DRP) & is.na(FW) & is.na(NC) & is.na(NT) & is.na(NS) & is.na(R) & is.na(SC) ))
+# Cov_ls_tab
+# write.csv(Cov_ls_tab, file.path(OUTPUT_DIR, "models/Cov_ls_Fo.csv"), row.names = FALSE, na = "")
 
 ### Infrastructure ----
 SUs_In <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_In.qs"))
@@ -912,7 +918,7 @@ ZStats_Woody_In <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs"))
 ZStats_Covs_In <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_In.qs"))
 KMRs <- names(ZStats_Covs_In)
 kmr <- KMRs[9]
-Model_In <- fit_model2(KMR = kmr, ClearType = 2, SpatUnits = SUs_In, RespData = ZStats_Woody_In, CovsCD = ZStats_Covs_In, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, N_rerun = 0, NMod_TOLN = 1e-11, Initial_Tlimit = 1000, OutputDir = NULL)
+Model_In <- fit_model(KMR = kmr, ClearType = 2, SpatUnits = SUs_In, RespData = ZStats_Woody_In, CovsCD = ZStats_Covs_In, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, N_rerun = 0, NMod_TOLN = 1e-11, Initial_Tlimit = 1000, OutputDir = NULL)
 Cov_ls_In <- summary(Model_In$PModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>% dplyr::select(Covariate)
 
 for (kmr in KMRs){
@@ -948,17 +954,17 @@ for (kmr in KMRs){
   Cov_ls_In <- left_join(Cov_ls_In, Cov_cof, by  = join_by("Covariate" == "Cov"))
 }
 
-Cov_ls_tab <- Cov_ls_In %>%
-  mutate(Variable = c("(Intercept)", "Population density", "Population growth", "Socio-Economic PC1", "Socio-Economic PC2", "Socio-Economic PC3", "Socio-Economic PC4",  "Socio-Economic PC5", 
-                      "Distance to road", "Distance to urban centre", "Property value", "Slope", "Rainfall", "Temperature", "Ecological condition", "Property size",
-                      "Planning Zone1", "Planning Zone2", "Planning Zone3", "Planning Zone4", "Land use type1", "Land use type2", "Land use type3", "Land use type4", "Drought")) %>%
-  dplyr::select(Variable, everything()) %>%
-  dplyr::select(-Covariate) %>%
-  arrange(Variable) %>% 
-  filter(Variable != "Land use type5",
-                            !(is.na(CC) & is.na(CST) & is.na(DRP) & is.na(FW) & is.na(NC) & is.na(NT) & is.na(NS) & is.na(R) & is.na(SC) ))
+# Cov_ls_tab <- Cov_ls_In %>%
+#   mutate(Variable = c("(Intercept)", "Population density", "Population growth", "Socio-Economic PC1", "Socio-Economic PC2", "Socio-Economic PC3", "Socio-Economic PC4",  "Socio-Economic PC5", 
+#                       "Distance to road", "Distance to urban centre", "Property value", "Slope", "Rainfall", "Temperature", "Ecological condition", "Property size",
+#                       "Planning Zone1", "Planning Zone2", "Planning Zone3", "Planning Zone4", "Land use type1", "Land use type2", "Land use type3", "Land use type4", "Drought")) %>%
+#   dplyr::select(Variable, everything()) %>%
+#   dplyr::select(-Covariate) %>%
+#   arrange(Variable) %>% 
+#   filter(Variable != "Land use type5",
+#                             !(is.na(CC) & is.na(CST) & is.na(DRP) & is.na(FW) & is.na(NC) & is.na(NT) & is.na(NS) & is.na(R) & is.na(SC) ))
 
-write.csv(Cov_ls_tab, file.path(OUTPUT_DIR, "models/Cov_ls_In.csv"), row.names = FALSE, na = "")
+# write.csv(Cov_ls_tab, file.path(OUTPUT_DIR, "models/Cov_ls_In.csv"), row.names = FALSE, na = "")
 
 # MODEL PREDICTIONS ----
 ## Refit the best model ----
@@ -1020,7 +1026,6 @@ write.csv(dMLIK_ClrTyps_BD, file = file.path(OUTPUT_DIR, "models/dMLIK.csv"), ro
 ## Example prediction by sampling from the posterior distribution ----
 # Load directory
 MODEL <- qread(file.path(OUTPUT_DIR, "models/Model_CC_Ag.qs"))
-
 CT <- if(MODEL$ClearType == "1"){"Ag"} else if(MODEL$ClearType == "2"){"In"} else if(MODEL$ClearType == "3"){"Fo"}
 N <- 20 # Number of samples
 cat("\n\nRun prediction by sampling " , N , "times for\nKMR: ",  MODEL$KMR, "\nClear Type: ", CT, "\n\n")
@@ -1133,6 +1138,8 @@ SUs_ZStats <- bind_cols(SUs %>% dplyr::select(-Area),
                      Woody = ifelse(sum.woody < WoodClr, WoodClr, sum.woody)) %>%
               filter(LandTen %in% c("1", "2")) %>%
               dplyr::select(KMR, SA1, SUID, Woody, WoodClr, Area) 
+st_write(SUs_ZStats, dsn = file.path(OUTPUT_DIR, "spatial_units/SUs_ZStats.gpkg"), layer = "SUs_ZStats", append = FALSE)
+
 ## Create a vector of KMRs
 KMRs_Long <- unique(SUs_ZStats$KMR)
 
@@ -1172,12 +1179,21 @@ Pred_ALL_DF <- full_join(Pred_In_DF, Pred_Ag_DF, by = c("KMR", "SUID")) %>%
            KhabRisk_All = 1 - (KhabRisk_Ag_n * KhabRisk_In_n * KhabRisk_Fo_n)) %>% 
     dplyr::select(KMR, SUID, Pred_In = PredAll_In, Pred_Ag = PredAll_Ag, Pred_Fo = PredAll_Fo, 
                   KhabRisk_Ag, KhabRisk_In, KhabRisk_Fo, KhabRisk_All, Pred_All)
+head(Pred_ALL_DF)
+nrow(Pred_ALL_DF)
+Pred_ALL_DF[is.na(Pred_ALL_DF$Pred_All),]
 
 ## Join with spatial units data
-SUs_Pred_SF <- left_join(SUs_ZStats %>% dplyr::select(KMR, SUID, SA1), Pred_ALL_DF, by = c("KMR", "SUID"))
+SUs_Pred_SF <- left_join(SUs_ZStats %>% dplyr::select(KMR, SUID, SA1, Woody, WoodClr), Pred_ALL_DF, by = c("KMR", "SUID")) %>% 
+  drop_na(Pred_All)
+SUs_Pred_SF[is.na(SUs_Pred_SF$Pred_All), ]
 
 ## Save the output to a geopackage
 gpkg_path <- file.path(OUTPUT_DIR, "predictions/SUs_Predictions.gpkg")
-if(!dir.exists(gpkg_path)){dir.create(gpkg_path)}
+# file.exists(gpkg_path)
+# dir.exists(gpkg_path)
+# unlink(gpkg_path, recursive = TRUE, force = TRUE)
+# if (file.exists(gpkg_path)) {file.remove(gpkg_path)}
+# dir.exists(dirname(gpkg_path))
 
 st_write(SUs_Pred_SF, dsn = gpkg_path, layer = "SUs_Predictions", append = FALSE)
