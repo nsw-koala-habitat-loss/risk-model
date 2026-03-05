@@ -74,97 +74,6 @@ INLArerun_with_Retry <- function(Result, N_RERUN_retry=3, Verbose = FALSE){
   return(result)
 }
 
-#' function to fit model with additional control for debugging----
-#' @param KMR text field for KMR - one of "CC", "CST", "DRP", "FW", "NC", "NT", "NS", "R", "SC"
-#' @param ClearType clearing type - one of 1 = agriculture, 2 = infrastructure, 3 = forestry
-#' @param SpatUnits spatial units as list of Spatvector objects (properties) for each KMR
-#' @param RespData response data consisting listr of clearing and woody vegetation data for each KMR
-#' @param CovsCD covariates for each spatial unit as a list for each KMR
-#' @param SA1sPoly SA1s spatial representation as a list of Spatvector objectd for each KMR
-#' @param Explanatory covariates to include in model - either "All" or a vector of covariate names
-#' @param Verbose logical to print progress
-#' @param NMod_TOLN tolerance for INLA model fitting (passed to INLA_with_Retry)
-#' @param N_retry number of retries for INLA model fitting (passed to INLA_with_TimeLimit)
-#' @param N_rerun number of reruns for INLA model fitting (passed to INLArerun_with_Retry)
-#' @param Initial_Tlimit initial time limit for INLA model fitting (passed to INLA_with_Retry)
-#' @param OutputDir directory to save model output (optional)
-#' @return list containing fitted models and input data
-fit_model <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD, SA1sPoly = SA1s, Explanatory = "All", Verbose = TRUE, NMod_TOLN = 0.005 , N_retry=3, N_rerun = 0, Initial_Tlimit = 1000, OutputDir = NULL) {  
-
-  # get attribute table of spatial units and join covariates
-  Covs <- SpatUnits[[KMR]] %>% st_drop_geometry() %>% as_tibble() %>% dplyr::select(-KMR) %>% bind_cols(CovsCD[[KMR]])
-  
-  # get response data and ensure clearing is < woody vegetation
-  Response <- RespData[[KMR]] %>% mutate(YAg = sum.aloss, YIn = sum.iloss, YFo = sum.floss, N = sum.woody) %>%
-    mutate(N = ifelse(N < YAg + YIn + YFo, YAg + YIn + YFo, N)) %>% dplyr::select(-sum.aloss, -sum.iloss, -sum.floss, -sum.woody)
-  
-  # set up data for INLA models
-  # response - how many cells cleared over time period
-  if (ClearType == 1) {
-    R <- Response %>% dplyr::select(YAg) %>% as.matrix()
-  } else if (ClearType == 2) {
-    R <- Response %>% dplyr::select(YIn) %>% as.matrix()
-  } else if (ClearType == 3) {
-    R <- Response %>% dplyr::select(YFo) %>% as.matrix()
-  }
-  
-  # number of trials - how many cells woody at start of time period
-  NT <- Response %>% dplyr::select(N) %>% as.matrix()
-  
-  # probability of clearing model
-  # format data for model fitting
-  RP <- R[which(NT > 0)] # only fit to data for properties with woody vegetation in 2011
-  RP <- as.vector(ifelse(RP > 0, 1, 0)) # recode to binary cleared/not cleared
-  NTP <- rep(1, length(RP)) # set number of trials to 1 for all properties in 2011
-  ResponseP <- as_tibble(cbind(RP, NTP))
-  names(ResponseP) <- c("P", "Ntrials")
-  CP <- Covs[which(NT > 0), ] # only fit to data for properties with woody vegetation
-  CP <- CP %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
-  DataP <- bind_cols(ResponseP, CP)
-  ExplV <- if(Explanatory == "All") {paste(names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse=" + ")} else {paste(Explanatory)}
-  
-  # get adjacency matrix for SA1s containing properties with forest cover
-  SA1IDs <- CP %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
-  SA1sPolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
-  Adj <- SA1sPolyKMR %>% 
-    get_adjacency(SpatialUnits =. , Name = paste0("modelP_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
-      FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
-  
-  # fit clearing versus no clearing model
-  formula <- as.formula(paste0(paste("P", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
-  ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-
-  # proportion cleared|clearing model
-  # format data for model fitting
-  RN <- R[which(R > 0)] # only fit to data from properties with some clearing
-  NTN <- NT[which(R > 0)] # only fit to data from properties with some clearing
-  ResponseN <- as_tibble(cbind(as.matrix(RN), as.matrix(NTN))) %>% mutate(Prop = RN / NTN) %>% mutate(Prop = ifelse(Prop < 1, Prop, 0.999)) # calculate the proportion cleared (when proportion = 1 set to 0.999)
-  names(ResponseN) <- c("N", "Ntrials", "Prop")
-  CN <- Covs[which(R > 0), ] # only fit to data from properties with some clearing
-  CN <- CN %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
-  DataN <- bind_cols(ResponseN, CN)
-  
-  # get adjacency matrix for SA1s containing properties with some clearing
-  SA1IDs <- CN %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
-  SA1PolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
-  Adj <- SA1sPolyKMR %>% 
-    get_adjacency(SpatialUnits =. , Name = paste0("modelN_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
-      FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
-  
-  # fit proportion cleared|clearing model
-  formula <- as.formula(paste0(paste("Prop", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
-  ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-  if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
-
-  # return models
-  if(!is.null(OutputDir)){
-    Model <- list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly)
-    output_FPath <- file.path(OutputDir, paste0("Model_", KMR, "_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, ".qs"))
-    qsave(Model, file = output_FPath)
-  }
-  return(list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly))
-}
-
 # function to fit model with additional control for debugging and informative prior----
 #' @param KMR text field for KMR - one of "CC", "CST", "DRP", "FW", "NC", "NT", "NS", "R", "SC"
 #' @param ClearType clearing type - one of 1 = agriculture, 2 = infrastructure, 3 = forestry
@@ -179,7 +88,10 @@ fit_model <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody, 
 #' @param N_rerun number of reruns for INLA model fitting (passed to INLArerun_with_Retry)
 #' @param Initial_Tlimit initial time limit for INLA model fitting (passed to INLA_with_Retry)
 #' @param OutputDir directory to save model output (optional)
-fit_model2 <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD, SA1sPoly = SA1s, Explanatory = "All", Verbose = TRUE, NMod_TOLN = 0.005 , N_retry=3, N_rerun = 0, Initial_Tlimit = 1000, OutputDir = NULL) {
+fit_model2 <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD, SA1sPoly = SA1s, 
+                       Explanatory = "All", Verbose = TRUE, 
+                       ReFit = TRUE, NMod_TOLN = 0.005 , N_retry=3, N_rerun = 0, 
+                       Initial_Tlimit = 1000, OutputDir = NULL) {
   # get attribute table of spatial units and join covariates
   Covs <- SpatUnits[[KMR]] %>% st_drop_geometry() %>% as_tibble() %>% dplyr::select(-KMR) %>% bind_cols(CovsCD[[KMR]])
   
@@ -212,31 +124,41 @@ fit_model2 <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody,
   CP <- CP %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
   DataP <- bind_cols(ResponseP, CP)
   ExplV_All <- paste(names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse=" + ")
-  ExplV <- if(Explanatory == "All") {paste(names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse=" + ")} else {paste(Explanatory)}
+  ExplV <- if(Explanatory == "All") {ExplV_All} else {paste(Explanatory)}
+
+  # if(is.null(bym_prior)){bym_prior <- list(prec.unstruct = list(prior = "loggamma", param = c(1, 5e-04), initial = 4, fixed = FALSE), prec.spatial = list(prior = "loggamma", param = c(1, 5e-04), initial = 4, fixed = FALSE))}
   
   # get adjacency matrix for SA1s containing properties with forest cover
   SA1IDs <- CP %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
   SA1sPolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
-  Adj <- SA1sPolyKMR %>% 
-    get_adjacency(SpatialUnits =. , Name = paste0("modelP_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
+  Adj <- get_adjacency(SpatialUnits = SA1sPolyKMR, Name = paste0("modelP_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
       FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
-  
+
   # fit clearing versus no clearing model
-  ## fit a full model first to get estimates for priors
-  formula <- as.formula(paste0(paste("P", ExplV_All, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
-  FullResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-  ## extract fixed effects estimates to use as priors
-  Fixed_mean <- setNames(c(FullResultP$summary.fixed[(2:nrow(FullResultP$summary.fixed)),1], 0), c(rownames(FullResultP$summary.fixed)[2:nrow(FullResultP$summary.fixed)], "default"))
-  Fixed_prec <- setNames(1/((c(FullResultP$summary.fixed[(2:nrow(FullResultP$summary.fixed)),2], 0.001)^2)*10), c(rownames(FullResultP$summary.fixed)[2:nrow(FullResultP$summary.fixed)], "default"))
-  Prior_mean <- Fixed_mean[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_mean))]
-  Prior_prec <- Fixed_prec[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_prec))]
-  ## fit final model with priors
-  formula <- as.formula(paste0(paste("P", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
-  ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataP, family = "binomial", Ntrials = Ntrials, control.fixed = list(mean = Prior_mean, prec = Prior_prec), control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-  
+  if(ReFit){ ## fit a full model first to get estimates for priors
+    formula <- as.formula(paste0(paste("P", ExplV_All, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
+    FullResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataP, family = "binomial", 
+                                  Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                                  control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    ## extract fixed effects estimates to use as priors
+    Fixed_mean <- setNames(c(FullResultP$summary.fixed[(2:nrow(FullResultP$summary.fixed)),1], 0), c(rownames(FullResultP$summary.fixed)[2:nrow(FullResultP$summary.fixed)], "default"))
+    Fixed_prec <- setNames(1/((c(FullResultP$summary.fixed[(2:nrow(FullResultP$summary.fixed)),2], 0.001)^2)*10), c(rownames(FullResultP$summary.fixed)[2:nrow(FullResultP$summary.fixed)], "default"))
+    Prior_mean <- Fixed_mean[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_mean))]
+    Prior_prec <- Fixed_prec[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_prec))]
+    ## fit final model with priors
+    formula <- as.formula(paste0(paste("P", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
+    ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataP, family = "binomial", 
+                               Ntrials = Ntrials, control.fixed = list(mean = Prior_mean, prec = Prior_prec), control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                               control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+  } else { # fit model with default priors
+    formula <- as.formula(paste0(paste("P", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
+    ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula = formula, data = DataP, family = "binomial", 
+                               Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                               control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+  }
+
   # proportion cleared|clearing model
-  
-  # format data for model fitting
+  ## format data for model fitting
   RN <- R[which(R > 0)] # only fit to data from properties with some clearing
   NTN <- NT[which(R > 0)] # only fit to data from properties with some clearing
   ResponseN <- as_tibble(cbind(as.matrix(RN), as.matrix(NTN))) %>% mutate(Prop = RN / NTN) %>% mutate(Prop = ifelse(Prop < 1, Prop, 0.999)) # calculate the proportion cleared (when proportion = 1 set to 0.999)
@@ -244,36 +166,42 @@ fit_model2 <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody,
   CN <- Covs[which(R > 0), ] # only fit to data from properties with some clearing
   CN <- CN %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
   DataN <- bind_cols(ResponseN, CN)
-  
-  # get adjacency matrix for SA1s containing properties with some clearing
-  SA1IDs <- CN %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
-  SA1PolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
-  Adj <- SA1sPolyKMR %>% 
-    get_adjacency(SpatialUnits =. , Name = paste0("modelN_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
-      FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
-  
+
   # fit proportion cleared|clearing model
-  ## fit a full model first to get estimates for priors
-  formula <- as.formula(paste0(paste("Prop", ExplV_All, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
-  FullResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-  ## extract fixed effects estimates to use as priors
-  Fixed_mean <- setNames(c(FullResultN$summary.fixed[(2:nrow(FullResultN$summary.fixed)),1], 0), c(rownames(FullResultN$summary.fixed)[2:nrow(FullResultN$summary.fixed)], "default"))
-  Fixed_prec <- setNames(1/((c(FullResultN$summary.fixed[(2:nrow(FullResultN$summary.fixed)),2], 0.001)^2)*10), c(rownames(FullResultN$summary.fixed)[2:nrow(FullResultN$summary.fixed)], "default"))
-  Prior_mean <- Fixed_mean[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_mean))]
-  Prior_prec <- Fixed_prec[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_prec))]
-  ## fit final model with priors
-  formula <- as.formula(paste0(paste("Prop", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
-  ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta", control.fixed = list(mean = Prior_mean, prec = Prior_prec), control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
-  if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
+  if(ReFit){ ## fit a full model first to get estimates for priors
+    formula <- as.formula(paste0(paste("Prop", ExplV_All, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
+    FullResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    ## extract fixed effects estimates to use as priors
+    Fixed_mean <- setNames(c(FullResultN$summary.fixed[(2:nrow(FullResultN$summary.fixed)),1], 0), c(rownames(FullResultN$summary.fixed)[2:nrow(FullResultN$summary.fixed)], "default"))
+    Fixed_prec <- setNames(1/((c(FullResultN$summary.fixed[(2:nrow(FullResultN$summary.fixed)),2], 0.001)^2)*10), c(rownames(FullResultN$summary.fixed)[2:nrow(FullResultN$summary.fixed)], "default"))
+    Prior_mean <- Fixed_mean[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_mean))]
+    Prior_prec <- Fixed_prec[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_prec))]
+    ## fit final model with priors
+    formula <- as.formula(paste0(paste("Prop", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
+    ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta", 
+                               control.fixed = list(mean = Prior_mean, prec = Prior_prec), control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), 
+                               control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
+  } else { # fit model with default priors
+    
+    formula <- as.formula(paste0(paste("Prop", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
+
+    ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta",
+                               control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), 
+                               control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    
+    if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
+  }
 
   # return models
   if(!is.null(OutputDir)){
     Model <- list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly)
-    output_FPath <- file.path(OutputDir, paste0("Model_", KMR, "_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, ".qs"))
-    qsave(Model, file = output_FPath)
+    output_FPath <- file.path(OutputDir, paste0("Model_", KMR, "_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, ".qs2"))
+    qs_save(Model, file = output_FPath)
   }
   return(list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly))
 }
+
 
 # function for model selection----
 #' @param KMR text field for KMR - one of "CC", "CST", "DRP", "FW", "NC", "NT", "NS", "R", "SC"
@@ -334,7 +262,7 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
   # get adjacency matrix for SA1s containing properties with forest cover
   SA1IDs <- CP %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
   SA1sPolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
-  AdjP <- SA1sPolyKMR %>% 
+  Adj <- SA1sPolyKMR %>% 
     get_adjacency(SpatialUnits =. , Name = paste0("modelP_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
       FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
   
@@ -346,13 +274,6 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
   CN <- Covs[which(R > 0), ] # only fit to data from properties with some clearing
   CN <- CN %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
   DataN <- bind_cols(ResponseN, CN)
-  
-  # get adjacency matrix for SA1s containing properties with some clearing
-  SA1IDs <- CN %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
-  SA1PolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
-  AdjN <- SA1sPolyKMR %>% 
-    get_adjacency(SpatialUnits =. , Name = paste0("modelN_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
-      FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
   
   # Placeholder for model with error
   ERROR_ls <- list()
@@ -370,11 +291,11 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
     ### Null Model ----
     tic("Null Model")
     # fit clearing versus no clearing model 
-    ForP_H0 <- as.formula(paste0(paste("P", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
+    ForP_H0 <- as.formula(paste0(paste("P", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
     ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H0, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     
     # fit proportion cleared|clearing model
-    ForN_H0 <- as.formula(paste0(paste("Prop", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
+    ForN_H0 <- as.formula(paste0(paste("Prop", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
     ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H0, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
 
@@ -400,12 +321,12 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
         explV <- paste(c(Sel_explV_ls, left_explV_ls[x]), collapse=" + ")
         
         # fit clearing versus no clearing model 
-        ForP_H1 <- as.formula(paste0(paste("P", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
+        ForP_H1 <- as.formula(paste0(paste("P", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
         tic(paste0("ExplV ", x, " of ", length(left_explV_ls)))
         ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
         
         # fit proportion cleared|clearing model
-        ForN_H1 <- as.formula(paste0(paste("Prop", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
+        ForN_H1 <- as.formula(paste0(paste("Prop", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
         ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H1, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
         if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
         toc(log = TRUE) # current model
@@ -458,11 +379,11 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
     ### Full Model ----
     tic("Full Model")
     # fit clearing versus no clearing model 
-    ForP_H0 <- as.formula(paste0(paste("P", paste(Full_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
+    ForP_H0 <- as.formula(paste0(paste("P", paste(Full_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
     ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H0, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     
     # fit proportion cleared|clearing model
-    ForN_H0 <- as.formula(paste0(paste("Prop", paste(Full_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
+    ForN_H0 <- as.formula(paste0(paste("Prop", paste(Full_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
     ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H0, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
 
@@ -488,13 +409,13 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
         explV <- paste(Sel_explV_ls[-x], collapse=" + ")
         
         # fit clearing versus no clearing model 
-        ForP_H1 <- as.formula(paste0(paste("P", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
+        ForP_H1 <- as.formula(paste0(paste("P", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
         tic(paste0("ExplV ", x, " of ", length(Sel_explV_ls)))
         # cat("Running: ", deparse(ForP_H1), "\n", sep = "")
         ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
         
         # fit proportion cleared|clearing model
-        ForN_H1 <- as.formula(paste0(paste("Prop", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
+        ForN_H1 <- as.formula(paste0(paste("Prop", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
         # cat(deparse(ForN_H1), "\n", sep = "")
         ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H1, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
         if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
@@ -539,12 +460,12 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
   
   ## Fit final model with selected explanatory variables ----
   # fit clearing versus no clearing model 
-  ForP_H1 <- as.formula(paste0(paste("P", paste(Sel_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
+  ForP_H1 <- as.formula(paste0(paste("P", paste(Sel_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
   cat("Running Best model: ", deparse(ForP_H1), "\n")
   ResultP <- INLA_with_Retry(N_retry=N_retry+2, Initial_Tlimit = Initial_Tlimit, ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
   
   # fit proportion cleared|clearing model
-  ForN_H1 <- as.formula(paste0(paste("Prop", paste(Sel_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
+  ForN_H1 <- as.formula(paste0(paste("Prop", paste(Sel_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
   cat(deparse(ForN_H1), "\n")
   ResultN <- INLA_with_Retry(N_retry=N_retry+2, Initial_Tlimit = Initial_Tlimit, ForN_H1, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
   if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
@@ -556,8 +477,8 @@ Select_model <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespData
   # return models
   if(!is.null(OutputDir)){
     Model <- list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly, DIC_ls = DIC_ls, ERROR_ls = ERROR_ls)
-    output_FPath <- file.path(OutputDir, paste0("SelModel_", KMR, "_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, Direction, ".qs"))
-    qsave(Model, file = output_FPath)
+    output_FPath <- file.path(OutputDir, paste0("SelModel_", KMR, "_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, Direction, ".qs2"))
+    qs_save(Model, file = output_FPath)
   }
   return(list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly, DIC_ls = DIC_ls, ERROR_ls = ERROR_ls))
 }
@@ -622,7 +543,7 @@ Select_model2 <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespDat
   # get adjacency matrix for SA1s containing properties with forest cover
   SA1IDs <- CP %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
   SA1sPolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
-  AdjP <- SA1sPolyKMR %>% 
+  Adj <- SA1sPolyKMR %>% 
     get_adjacency(SpatialUnits =. , Name = paste0("modelP_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
       FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
   
@@ -635,21 +556,14 @@ Select_model2 <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespDat
   CN <- CN %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
   DataN <- bind_cols(ResponseN, CN)
   
-  # get adjacency matrix for SA1s containing properties with some clearing
-  SA1IDs <- CN %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
-  SA1PolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
-  AdjN <- SA1sPolyKMR %>% 
-    get_adjacency(SpatialUnits =. , Name = paste0("modelN_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
-      FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
-  
   # Fit the full model to get priors ----
-  formula <- as.formula(paste0(paste("P", paste(names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
+  formula <- as.formula(paste0(paste("P", paste(names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
   FullResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
   ## extract fixed effects estimates to use as priors
   Fixed_meanP <- setNames(c(FullResultP$summary.fixed[(2:nrow(FullResultP$summary.fixed)),1], 0), c(rownames(FullResultP$summary.fixed)[2:nrow(FullResultP$summary.fixed)], "default"))
   Fixed_precP <- setNames(1/((c(FullResultP$summary.fixed[(2:nrow(FullResultP$summary.fixed)),2], 0.001)^2)*10), c(rownames(FullResultP$summary.fixed)[2:nrow(FullResultP$summary.fixed)], "default"))
   
-  formula <- as.formula(paste0(paste("Prop", paste(names(CN %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
+  formula <- as.formula(paste0(paste("Prop", paste(names(CN %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
   FullResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
   if(N_rerun > 0){FullResultN <- INLArerun_with_Retry(Result = FullResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
   ## extract fixed effects estimates to use as priors
@@ -672,11 +586,11 @@ Select_model2 <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespDat
     ### Null Model ----
     tic("Null Model")
     # fit clearing versus no clearing model 
-    ForP_H0 <- as.formula(paste0(paste("P", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
+    ForP_H0 <- as.formula(paste0(paste("P", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
     ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H0, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     
     # fit proportion cleared|clearing model
-    ForN_H0 <- as.formula(paste0(paste("Prop", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
+    ForN_H0 <- as.formula(paste0(paste("Prop", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
     ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H0, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
 
@@ -708,12 +622,12 @@ Select_model2 <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespDat
         Prior_precN <- Fixed_precN[match(c(unlist(strsplit(explV, " + ", fixed=TRUE)), "default"), names(Fixed_precN))]
         
         # fit clearing versus no clearing model with priors
-        ForP_H1 <- as.formula(paste0(paste("P", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
+        ForP_H1 <- as.formula(paste0(paste("P", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
         tic(paste0("ExplV ", x, " of ", length(left_explV_ls)))
         ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.fixed = list(mean = Prior_meanP, prec = Prior_precP), control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
 
         # fit proportion cleared|clearing model with priors
-        ForN_H1 <- as.formula(paste0(paste("Prop", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
+        ForN_H1 <- as.formula(paste0(paste("Prop", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
         ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H1, data = DataN, family = "beta", control.fixed = list(mean = Prior_meanN, prec = Prior_precN), control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
         if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
         toc(log = TRUE) # current model
@@ -766,11 +680,11 @@ Select_model2 <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespDat
     ### Full Model ----
     tic("Full Model")
     # fit clearing versus no clearing model 
-    ForP_H0 <- as.formula(paste0(paste("P", paste(Full_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
+    ForP_H0 <- as.formula(paste0(paste("P", paste(Full_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
     ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H0, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     
     # fit proportion cleared|clearing model
-    ForN_H0 <- as.formula(paste0(paste("Prop", paste(Full_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
+    ForN_H0 <- as.formula(paste0(paste("Prop", paste(Full_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
     ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H0, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
     if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
 
@@ -802,13 +716,13 @@ Select_model2 <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespDat
         Prior_precN <- Fixed_precN[match(c(unlist(strsplit(explV, " + ", fixed=TRUE)), "default"), names(Fixed_precN))]
                 
         # fit clearing versus no clearing model 
-        ForP_H1 <- as.formula(paste0(paste("P", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
+        ForP_H1 <- as.formula(paste0(paste("P", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
         tic(paste0("ExplV ", x, " of ", length(Sel_explV_ls)))
         # cat("Running: ", deparse(ForP_H1), "\n", sep = "")
         ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.fixed = list(mean = Prior_meanP, prec = Prior_precP), control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
         
         # fit proportion cleared|clearing model
-        ForN_H1 <- as.formula(paste0(paste("Prop", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
+        ForN_H1 <- as.formula(paste0(paste("Prop", explV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
         # cat(deparse(ForN_H1), "\n", sep = "")
         ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, ForN_H1, data = DataN, family = "beta", control.fixed = list(mean = Prior_meanN, prec = Prior_precN), control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
         if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
@@ -860,12 +774,12 @@ Select_model2 <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespDat
   Prior_precN <- Fixed_precN[match(c(unlist(strsplit(paste(Sel_explV_ls, collapse=" + "), " + ", fixed=TRUE)), "default"), names(Fixed_precN))]
 
   # fit clearing versus no clearing model 
-  ForP_H1 <- as.formula(paste0(paste("P", paste(Sel_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjP, scale.model = TRUE)"))
+  ForP_H1 <- as.formula(paste0(paste("P", paste(Sel_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
   cat("Running Best model: ", deparse(ForP_H1), "\n")
   ResultP <- INLA_with_Retry(N_retry=N_retry+2, Initial_Tlimit = Initial_Tlimit, ForP_H1, data = DataP, family = "binomial", Ntrials = Ntrials, control.fixed = list(mean = Prior_meanP, prec = Prior_precP), control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
   
   # fit proportion cleared|clearing model
-  ForN_H1 <- as.formula(paste0(paste("Prop", paste(Sel_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = AdjN, scale.model = TRUE)"))
+  ForN_H1 <- as.formula(paste0(paste("Prop", paste(Sel_explV_ls, collapse = " + "), sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
   cat(deparse(ForN_H1), "\n")
   ResultN <- INLA_with_Retry(N_retry=N_retry+2, Initial_Tlimit = Initial_Tlimit, ForN_H1, data = DataN, family = "beta", control.fixed = list(mean = Prior_meanN, prec = Prior_precN), control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
   if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
@@ -877,8 +791,8 @@ Select_model2 <- function(KMR = "CC", ClearType = 1, SpatUnits = SUs_Ag, RespDat
   # return models
   if(!is.null(OutputDir)){
     Model <- list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly, DIC_ls = DIC_ls, ERROR_ls = ERROR_ls)
-    output_FPath <- file.path(OutputDir, paste0("SelModel_", KMR, "_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, Direction, ".qs"))
-    qsave(Model, file = output_FPath)
+    output_FPath <- file.path(OutputDir, paste0("SelModel_", KMR, "_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, Direction, ".qs2"))
+    qs_save(Model, file = output_FPath)
   }
   return(list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly, DIC_ls = DIC_ls, ERROR_ls = ERROR_ls))
 }
@@ -902,8 +816,8 @@ refit_model <- function(KMR = "CC", ClearType = 1, N_rerun = 0 , NMod_TOLN = 0.0
   }
   
   # read model selection results for both forward and backward selection
-  SelModel_BC <- qread(file.path(ModelDir, paste0("SelModel_", KMR, "_" , CT , "_BC.qs")))
-  SelModel_FC <- qread(file.path(ModelDir, paste0("SelModel_", KMR, "_" , CT , "_FC.qs")))
+  SelModel_BC <- qread(file.path(ModelDir, paste0("SelModel_", KMR, "_" , CT , "_BC.qs2")))
+  SelModel_FC <- qread(file.path(ModelDir, paste0("SelModel_", KMR, "_" , CT , "_FC.qs2")))
   
   # Find minimum DIC values recorded in the model selection steps (WHILE LOOP)
   MinDIC_BC <- SelModel_BC$DIC_ls[which.min(unlist(SelModel_BC$DIC_ls))]
@@ -925,8 +839,8 @@ refit_model <- function(KMR = "CC", ClearType = 1, N_rerun = 0 , NMod_TOLN = 0.0
                       N_rerun = N_rerun,  NMod_TOLN = NMod_TOLN, Verbose = FALSE)
   
   # return models
-  output_FPath <- file.path(ModelDir, paste0("Model_", KMR, "_" , CT , ".qs"))
-  qsave(Model, file = output_FPath)
+  output_FPath <- file.path(ModelDir, paste0("Model_", KMR, "_" , CT , ".qs2"))
+  qs_save(Model, file = output_FPath)
   
   return(list(PModel = Model$PModel, NModel = Model$NModel, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly))
 }
@@ -1047,7 +961,7 @@ predict_model3 <- function(model, N = 1000, RandEff = "SA1ID", verbose = TRUE){
 #' @param ClearType Clearing type: 1 = Agriculture, 2 = Infrastructure, 3 = Forestry
 #' @param Prediction_DIR Directory containing the prediction files, output from predict_model* function
 #' @param WRITE_SHP Write shapefile output (Default = TRUE: write output shapefile, FALSE: do not write output shapefile)
-#' @param WRITE_DATA Write .qs output (Default = TRUE: write output .qs, FALSE: do not write output .qs)
+#' @param WRITE_DATA Write .qs2 output (Default = TRUE: write output .qs2, FALSE: do not write output .qs2)
 Combine_Predictions <- function(ClearType = 1, Prediction_DIR = "output/predictions/", WRITE_SHP = TRUE, WRITE_DATA = TRUE){
 
   if (ClearType == 1) {
@@ -1058,7 +972,7 @@ Combine_Predictions <- function(ClearType = 1, Prediction_DIR = "output/predicti
     CT <- "Fo"
   }
   
-  Pred_Flist <- list.files(Prediction_DIR, pattern = paste0("^Pred_.*_", CT ,"\\.qs$"), full.names = TRUE)
+  Pred_Flist <- list.files(Prediction_DIR, pattern = paste0("^Pred_.*_", CT ,"\\.qs2$"), full.names = TRUE)
   
   Layer_list <- map(Pred_Flist, ~qread(.x)$Layer)
   
@@ -1071,8 +985,8 @@ Combine_Predictions <- function(ClearType = 1, Prediction_DIR = "output/predicti
              driver = "OpenFileGDB", append = FALSE)
   }
   if (WRITE_DATA) {
-    DATA_Filename <- file.path(Prediction_DIR, paste0("Pred_", CT, ".qs"))
-    qsave(Layer_comb, DATA_Filename)
+    DATA_Filename <- file.path(Prediction_DIR, paste0("Pred_", CT, ".qs2"))
+    qs_save(Layer_comb, DATA_Filename)
   }
   
   return(Layer_comb)
@@ -1089,9 +1003,9 @@ Prep_Khab <- function(ZStats_Woody, KMR_name_df){
   return(Khab_data)
 }
 
-# Function to calculate the risk of Koala habitat loss ----
-#' @param Pred_data .qs or .shp output from Combine_Predictions function
-#' @param Khab_data .qs output from Prep_Khab function. This should consist of KHAB, SUID and KMR
+#' Function to calculate the risk of Koala habitat loss ----
+#' @param Pred_data .qs2 or .shp output from Combine_Predictions function
+#' @param Khab_data .qs2 output from Prep_Khab function. This should consist of KHAB, SUID and KMR
 Get_Khab_loss_risk <- function(Pred_data, Khab_data){
   
   Pred_Khab <- Pred_data %>% left_join(Khab_data, by = join_by(SUID == SUID, KMR == KMR)) %>% 
@@ -1116,10 +1030,10 @@ Get_cov_coeff_long <- function(ClearType, OUTPUT_DIR) {
   }
   
   # Read the required datasets based on the clear type - CT
-  SUs <- qread(file.path(OUTPUT_DIR, paste0("spatial_units/sus_", CT, ".qs")))
-  ZStats_Woody <- qread(file.path(OUTPUT_DIR, paste0("data/ZStats_Woody_", CT, ".qs")))
-  ZStats_Covs <- qread(file.path(OUTPUT_DIR, paste0("data/ZStats_Covs_", CT, ".qs")))
-  SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
+  SUs <- qread(file.path(OUTPUT_DIR, paste0("spatial_units/sus_", CT, ".qs2")))
+  ZStats_Woody <- qread(file.path(OUTPUT_DIR, paste0("data/ZStats_Woody_", CT, ".qs2")))
+  ZStats_Covs <- qread(file.path(OUTPUT_DIR, paste0("data/ZStats_Covs_", CT, ".qs2")))
+  SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs2"))
   
   KMRs <- names(ZStats_Covs)
   kmr <- KMRs[1]
@@ -1136,7 +1050,7 @@ Get_cov_coeff_long <- function(ClearType, OUTPUT_DIR) {
   
   # Loop through each KMR and gather covariate and coefficient data
   for (kmr in KMRs) {
-    MODEL <- qread(file.path(OUTPUT_DIR, paste0("models/Model_", kmr, "_", CT, ".qs")))
+    MODEL <- qread(file.path(OUTPUT_DIR, paste0("models/Model_", kmr, "_", CT, ".qs2")))
     
     Cov <- summary(MODEL$PModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>%
       dplyr::select(Covariate) %>% unlist()
@@ -1164,6 +1078,343 @@ Get_cov_coeff_long <- function(ClearType, OUTPUT_DIR) {
   return(Cov_ls_long)
 }
 
+Get_cov_coeff_CI <- function(ClearType, OUTPUT_DIR) {
+  # ClearType
+  if(ClearType == 1){
+    CT <- "Ag"
+  } else if(ClearType == 2){
+    CT <- "In"
+  } else if(ClearType == 3){
+    CT <- "Fo"
+  }
+  
+  # Read the required datasets based on the clear type - CT
+  ZStats_Covs <- qs_read(file.path(OUTPUT_DIR, paste0("data/ZStats_Covs_", CT, ".qs2")))
+  KMRs <- names(ZStats_Covs)
+  rm(ZStats_Covs)
+  Cov_coeff_CI_ls <- map(KMRs, function(kmr){
+    MODEL <- qread(file.path(OUTPUT_DIR, paste0("models/Model_", kmr, "_", CT, ".qs2")))
+    
+    Cov_PModel_df <- summary(MODEL$PModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>% 
+      dplyr::select(Covariate, mean, sd, LowerCI = `0.025quant`, UpperCI = `0.975quant`) %>% 
+      rename_with(.cols = c(mean, sd, LowerCI, UpperCI), ~paste0(kmr, "_PMod_", .x))
+    
+    Cov_NModel_df <- summary(MODEL$NModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>% 
+      dplyr::select(Covariate, mean, sd, LowerCI = `0.025quant`, UpperCI = `0.975quant`) %>% 
+      rename_with(.cols = c(mean, sd, LowerCI, UpperCI), ~paste0(kmr, "_NMod_", .x))
+
+    Cov_df <- full_join(Cov_PModel_df, Cov_NModel_df, by = "Covariate")  %>% 
+      filter(Covariate != "(Intercept)")
+    
+    rownames(Cov_df) <- NULL
+    return(Cov_df)
+  })
+  Cov_coeff_CI_DF <- reduce(Cov_coeff_CI_ls, full_join, by = "Covariate") %>% 
+    pivot_longer(cols = -Covariate, names_to = c("KMR", "Model", "Stat"), names_sep = "_") %>% 
+    pivot_wider(names_from = Stat, values_from = value) %>% 
+    as.data.frame()
+  return(Cov_coeff_CI_DF)
+}
+
+kmr <- KMR <- "R"
+ClearType <- 1
+
+Get_rand_coeff_CI <- function(ClearType, kmr, OUTPUT_DIR) {
+  
+  # ClearType
+  if(ClearType == 1){CT <- "Ag"} else if(ClearType == 2){CT <- "In"} else if(ClearType == 3){CT <- "Fo"}
+  ZStats_Covs <- qs_read(file.path(OUTPUT_DIR, paste0("data/ZStats_Covs_", CT, ".qs2")))
+  KMRs <- names(ZStats_Covs)
+  rm(ZStats_Covs)
+  
+  Cov_coeff_CI_DF <- map(KMRs, function(kmr){
+    MODEL <- qs_read(file.path(OUTPUT_DIR, paste0("models/Model_", kmr, "_", CT, ".qs2")))
+    PModel <- MODEL$PModel
+    NModel <- MODEL$NModel
+    CovsCD <- MODEL$CovsCD[[kmr]]
+    Covs <- MODEL$SpatUnits[[kmr]] %>% st_drop_geometry() %>% as_tibble() %>% dplyr::select(-KMR) %>% bind_cols(CovsCD)
+    Response <- MODEL$RespData[[kmr]]%>% mutate(YAg = sum.aloss, YIn = sum.iloss, YFo = sum.floss, N = sum.woody) %>%
+      mutate(N = ifelse(N < YAg + YIn + YFo, YAg + YIn + YFo, N)) %>% dplyr::select(-sum.aloss, -sum.iloss, -sum.floss, -sum.woody)
+    if (ClearType == 1) {
+      R <- Response %>% dplyr::select(YAg) %>% as.matrix()
+    } else if (ClearType == 2) {
+      R <- Response %>% dplyr::select(YIn) %>% as.matrix()
+    } else if (ClearType == 3) {
+      R <- Response %>% dplyr::select(YFo) %>% as.matrix()
+    }
+    NT <- Response %>% dplyr::select(N) %>% as.matrix()
+    RP <- R[which(NT > 0)] # only fit to data for properties with woody vegetation in 2011
+    RP <- as.vector(ifelse(RP > 0, 1, 0)) # recode to binary cleared/not cleared
+    NTP <- rep(1, length(RP)) # set number of trials to 1 for all properties in 2011
+    ResponseP <- as_tibble(cbind(RP, NTP))
+    names(ResponseP) <- c("P", "Ntrials")
+    CP <- Covs[which(NT > 0), ] # only fit to data for properties with woody vegetation
+    CP <- CP %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
+    DataP <- bind_cols(ResponseP, CP)
+    SA1IDs <- CP %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
+    SA1sPolyKMR <- MODEL$SA1sPoly[[kmr]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID) %>% select(SA1_CODE21, SA1ID)
+    BsgEFF_P <- MODEL$PModel$summary.random$SA1ID[(nrow(SA1sPolyKMR)+1):nrow(MODEL$PModel$summary.random$SA1ID),"mean"]
+    IIDEFF_P <- MODEL$PModel$summary.random$SA1ID[1:nrow(SA1sPolyKMR),"mean"] - BsgEFF_P
+    BsgEFF_N <- MODEL$NModel$summary.random$SA1ID[(nrow(SA1sPolyKMR)+1):nrow(MODEL$NModel$summary.random$SA1ID),"mean"]
+    IIDEFF_N <- MODEL$NModel$summary.random$SA1ID[1:nrow(SA1sPolyKMR),"mean"] - BsgEFF_N
+    Rand_DF <- bind_cols(SA1sPolyKMR %>% st_drop_geometry() %>% dplyr::select(SA1_CODE21), BsgEFF_P = BsgEFF_P, IIDEFF_P = IIDEFF_P, BsgEFF_N = BsgEFF_N, IIDEFF_N = IIDEFF_N)
+    return(Rand_DF)
+  }) %>% list_rbind() %>% 
+  group_by(SA1_CODE21) %>%
+  summarise(BsgEFF_P = mean(BsgEFF_P), IIDEFF_P = mean(IIDEFF_P), BsgEFF_N = mean(BsgEFF_N), IIDEFF_N = mean(IIDEFF_N), .groups = "drop")
+  return(Cov_coeff_CI_DF)
+}
+
+# Function to plot Single deforestation risk / Koala habitat loss ----
+#' @param DATA Spatial polygon data with deforestation risk or Koala habitat loss risk for each polygon
+#' @param FILL Variable name to be plotted
+#' @param LEGEND_Title Text for lebeling the legend
+#' @param ClearType 1 = Ag, 2 = In, 3 = Fo
+#' @param FilenamePath_PNG Directory to save the plot as a PNG file (optional) {set to NULL to not save}
+#' @param PNG_width Width of the PNG file
+#' @param PNG_height Height of the PNG file
+#' @param PNG_dpi DPI of the PNG file
+PLOTMAP_risk <- function(DATA, FILL, LEGEND_Title = "Koala habitat\nloss risk", 
+                         COLOUR = hcl.colors(8, palette = "Reds 3" ,rev = TRUE), 
+                         SCALE_LIMIT = c(0,1), SCALE_BREAKS = NULL, SCALE_LABELS = NULL,
+                         North_arrow = FALSE, Scale_bar = FALSE, LABEL_CITYS = FALSE, LEG_POS = c(0.90, 0.2),
+                         XLIM = st_bbox(KMR_shp)[c(1,3)] + c(-10000, 10000), 
+                         YLIM = st_bbox(KMR_shp)[c(2,4)] + c(-5000, 5000),
+                         FilenamePath_PNG = NULL, PNG_width = 11, PNG_height = 11, PNG_dpi = 300){
+  
+  # Plot the deforestation risk or Koala habitat loss risk
+  Plot <- ggplot() +
+        
+    geom_sf(data = STE, fill = "grey50", color = "grey10", lwd = 0.2)+
+    geom_sf(data = NSW, fill = "grey75", color = "white", lwd = 0.2)+
+    geom_sf(data = DATA, aes(fill = {{FILL}}), color = NA)+
+    scale_fill_gradientn(colours = COLOUR, name = LEGEND_Title, 
+                         limits = SCALE_LIMIT, oob = scales::squish,
+                         breaks = if(!is.null(SCALE_BREAKS)){SCALE_BREAKS} else {waiver()},
+                         labels = if(!is.null(SCALE_LABELS)){SCALE_LABELS} else {waiver()})+
+
+    geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.2, linetype= "dotdash")+
+    geom_sf(data = NSW, fill = "transparent", color = "grey10", lwd = 0.4)+
+    
+    # start a new scale
+    # new_scale_colour() +
+    
+    # selected urban points
+    geom_sf(data = NSW_urb_sel_pt, colour = "black", size = 2, shape = 21, fill = "goldenrod")+
+    # geom_text_repel(data = NSW_urb_sel_pt, aes(x = x, y = y , label = UCL_NAME16),
+    #                 nudge_y = -5, size = 5, color = "black", bg.color = "grey90", bg.r = 0.1)+
+    
+    theme_void() + 
+    theme(axis.ticks.x = element_blank(),axis.text.x = element_blank(), axis.line.x = element_blank())+
+    theme(axis.ticks.y = element_blank(),axis.text.y = element_blank(), axis.line.y = element_blank())+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+    theme(legend.position = LEG_POS)+
+    theme(legend.title = element_text(size = 18, margin = margin(b=10)), legend.text = element_text(size = 18))+
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank())+
+    theme(legend.key.width = unit(1, "cm"), legend.key.height = unit(1, "cm"))+
+    theme(panel.background = element_rect(fill = "#C7E6F5", color = NA), 
+          plot.margin = margin(0, 0, 0, 0), panel.border = element_rect(colour = "black",
+          fill = NA, linewidth = 1))+
+    coord_sf(xlim = XLIM, ylim = YLIM, expand = FALSE)
+
+    if(LABEL_CITYS){
+      Plot <- Plot +
+        geom_text_repel(data = NSW_urb_sel_pt, aes(x = x, y = y , label = UCL_NAME16),
+                    nudge_y = -5, size = 6, color = "black", bg.color = "grey90", bg.r = 0.1)
+    }
+
+    if(North_arrow){
+      Plot <- Plot + 
+        ggspatial::annotation_north_arrow(location = "tr", which_north = "true",
+                            pad_x = unit(0.15, "cm"), pad_y = unit(1, "cm"), 
+                            height = unit(2, "cm"), width = unit(2, "cm"),
+                            style = ggspatial::north_arrow_fancy_orienteering(text_size =20, line_width = 1.5))
+      
+    }
+    if(Scale_bar){
+      Plot <- Plot + 
+        ggspatial::annotation_scale(width_hint = 0.25, style = "ticks", 
+                                  text_col = "black", line_col = "black",
+                                  pad_x = unit(0.25, "cm"), pad_y = unit(0.2, "cm"),
+                                  location = "br", unit_category = "metric", line_width = 1.5, 
+                                  height = unit(0.5, "cm"), text_cex = 1.25, tick_height = 0.5)
+    }
+  
+  if(!is.null(FilenamePath_PNG)){
+    if(tools::file_ext(FilenamePath_PNG) != "png"){warning("Filename extension should be '.png'")}
+    ggsave(FilenamePath_PNG, Plot, width = PNG_width, height = PNG_height, dpi = PNG_dpi)
+  }
+  return(Plot)
+}
+
+# Function to plot Single deforestation risk / Koala habitat loss with specific location for city labels----
+#' @param DATA Spatial polygon data with deforestation risk or Koala habitat loss risk for each polygon
+#' @param FILL Variable name to be plotted
+#' @param LEGEND_Title Text for lebeling the legend
+#' @param ClearType 1 = Ag, 2 = In, 3 = Fo
+#' @param FilenamePath_PNG Directory to save the plot as a PNG file (optional) {set to NULL to not save}
+#' @param PNG_width Width of the PNG file
+#' @param PNG_height Height of the PNG file
+#' @param PNG_dpi DPI of the PNG file
+PLOTMAP_risk2 <- function(DATA, FILL, LEGEND_Title = "Koala habitat\nloss risk", 
+                         COLOUR = hcl.colors(8, palette = "Reds 3" ,rev = TRUE), 
+                         SCALE_LIMIT = c(0,1), SCALE_BREAKS = NULL, SCALE_LABELS = NULL,
+                         North_arrow = FALSE, Scale_bar = FALSE, LABEL_CITYS = FALSE, LEG_POS = c(0.90, 0.2),
+                         XLIM = st_bbox(KMR_shp)[c(1,3)] + c(-10000, 10000), 
+                         YLIM = st_bbox(KMR_shp)[c(2,4)] + c(-5000, 5000),
+                         FilenamePath_PNG = NULL, PNG_width = 11, PNG_height = 11, PNG_dpi = 300){
+  
+  # Plot the deforestation risk or Koala habitat loss risk
+  Plot <- ggplot() +
+        
+    geom_sf(data = STE, fill = "grey60", color = "grey10", lwd = 0.2)+
+    geom_sf(data = NSW, fill = "grey85", color = "white", lwd = 0.2)+
+    geom_sf(data = DATA, aes(fill = {{FILL}}), color = NA)+
+    scale_fill_gradientn(colours = COLOUR, name = LEGEND_Title, 
+                         limits = SCALE_LIMIT, oob = scales::squish,
+                         breaks = if(!is.null(SCALE_BREAKS)){SCALE_BREAKS} else {waiver()},
+                         labels = if(!is.null(SCALE_LABELS)){SCALE_LABELS} else {waiver()})+
+
+    geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.2, linetype= "dotdash")+
+    geom_sf(data = NSW, fill = "transparent", color = "grey10", lwd = 0.4)+
+    
+    # start a new scale
+    # new_scale_colour() +
+    
+    # selected urban points
+    geom_sf(data = NSW_urb_sel_pt2, colour = "black", size = 2, shape = 21, fill = "goldenrod")+
+    # geom_text_repel(data = NSW_urb_sel_pt, aes(x = x, y = y , label = UCL_NAME16),
+    #                 nudge_y = -5, size = 5, color = "black", bg.color = "grey90", bg.r = 0.1)+
+    
+    theme_void() + 
+    theme(axis.ticks.x = element_blank(),axis.text.x = element_blank(), axis.line.x = element_blank())+
+    theme(axis.ticks.y = element_blank(),axis.text.y = element_blank(), axis.line.y = element_blank())+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+    theme(legend.position = LEG_POS)+
+    theme(legend.title = element_text(size = 18, margin = margin(b=10)), legend.text = element_text(size = 18))+
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank())+
+    theme(legend.key.width = unit(1, "cm"), legend.key.height = unit(1, "cm"))+
+    theme(panel.background = element_rect(fill = "#C7E6F5", color = NA), 
+          plot.margin = margin(0, 0, 0, 0), panel.border = element_rect(colour = "black",
+          fill = NA, linewidth = 1))+
+    coord_sf(xlim = XLIM, ylim = YLIM, expand = FALSE)
+
+    if(LABEL_CITYS){
+      Plot <- Plot +
+        geom_shadowtext(data = NSW_urb_sel_pt2, aes(x = x, y = y , label = UCL_NAME16),
+                        size = 6, color = "black", bg.color = "grey90", bg.r = 0.13)+
+        geom_curve(data = NSW_urb_sel_pt2_seg_df %>% filter(UCL_NAME16 %in% c("Wagga Wagga", "Deniliquin")), aes(x = x, y = y, xend = xend, yend = yend), 
+              curvature = 0.2, linewidth = 0.3, color = "black", arrow = arrow(length = unit(0.15, "cm")))+
+        geom_curve(data = NSW_urb_sel_pt2_seg_df %>% filter(!UCL_NAME16 %in% c("Wagga Wagga", "Deniliquin")), aes(x = x, y = y, xend = xend, yend = yend), 
+              curvature = -0.3, linewidth = 0.3, color = "black", arrow = arrow(length = unit(0.15, "cm")))
+    }
+
+    if(North_arrow){
+      Plot <- Plot + 
+        ggspatial::annotation_north_arrow(location = "tr", which_north = "true",
+                            pad_x = unit(0.15, "cm"), pad_y = unit(1, "cm"), 
+                            height = unit(2, "cm"), width = unit(2, "cm"),
+                            style = ggspatial::north_arrow_fancy_orienteering(text_size =20, line_width = 1.5))
+      
+    }
+    if(Scale_bar){
+      Plot <- Plot + 
+        ggspatial::annotation_scale(width_hint = 0.25, style = "ticks", 
+                                  text_col = "black", line_col = "black",
+                                  pad_x = unit(0.25, "cm"), pad_y = unit(0.2, "cm"),
+                                  location = "br", unit_category = "metric", line_width = 1.5, 
+                                  height = unit(0.5, "cm"), text_cex = 1.25, tick_height = 0.5)
+    }
+  
+  if(!is.null(FilenamePath_PNG)){
+    if(tools::file_ext(FilenamePath_PNG) != "png"){warning("Filename extension should be '.png'")}
+    ggsave(FilenamePath_PNG, Plot, width = PNG_width, height = PNG_height, dpi = PNG_dpi)
+  }
+  return(Plot)
+}
+
+# Function to plot Random effects ----
+#' @param DATA Spatial polygon data with deforestation risk or Koala habitat loss risk for each polygon
+#' @param FILL Variable name to be plotted
+#' @param LEGEND_Title Text for lebeling the legend
+#' @param FilenamePath_PNG Directory to save the plot as a PNG file (optional) {set to NULL to not save}
+#' @param PNG_width Width of the PNG file
+#' @param PNG_height Height of the PNG file
+#' @param PNG_dpi DPI of the PNG file
+PLOTMAP_Rand <- function(DATA, FILL, LEGEND_Title = "Koala habitat\nloss risk", 
+                        #  COLOUR = hcl.colors(8, palette = "Viridis" ,rev = TRUE), 
+                        COL_Low = "#0000a3", COL_MID = "white", COL_High = "#740202",
+                         North_arrow = FALSE, Scale_bar = FALSE, LABEL_CITYS = FALSE, LEG_POS = c(0.90, 0.2),
+                         XLIM = st_bbox(KMR_shp)[c(1,3)] + c(-10000, 10000), 
+                         YLIM = st_bbox(KMR_shp)[c(2,4)] + c(-5000, 5000),
+                         FilenamePath_PNG = NULL, PNG_width = 11, PNG_height = 11, PNG_dpi = 300){
+  
+  # Plot the deforestation risk or Koala habitat loss risk
+  Plot <- ggplot() +
+        
+    geom_sf(data = STE, fill = "grey60", color = "grey10", lwd = 0.2)+
+    geom_sf(data = NSW, fill = "grey85", color = "white", lwd = 0.2)+
+    geom_sf(data = DATA, aes(fill = {{FILL}}), color = NA)+
+    # scale_fill_gradientn(colours = COLOUR, name = LEGEND_Title) +
+    scale_fill_gradient2(low = COL_Low, mid = COL_MID, high = COL_High, 
+                         na.value = "transparent", name = LEGEND_Title)+
+    geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.2, linetype= "dotdash")+
+    geom_sf(data = NSW, fill = "transparent", color = "grey10", lwd = 0.4)+
+    
+    # start a new scale
+    # new_scale_colour() +
+    
+    # selected urban points
+    geom_sf(data = NSW_urb_sel_pt2, colour = "black", size = 2, shape = 21, fill = "goldenrod")+
+    # geom_text_repel(data = NSW_urb_sel_pt, aes(x = x, y = y , label = UCL_NAME16),
+    #                 nudge_y = -5, size = 5, color = "black", bg.color = "grey90", bg.r = 0.1)+
+    
+    theme_void() + 
+    theme(axis.ticks.x = element_blank(),axis.text.x = element_blank(), axis.line.x = element_blank())+
+    theme(axis.ticks.y = element_blank(),axis.text.y = element_blank(), axis.line.y = element_blank())+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+    theme(legend.position = LEG_POS)+
+    theme(legend.title = element_text(size = 15, margin = margin(b=10)), legend.text = element_text(size = 15))+
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank())+
+    theme(legend.key.width = unit(1, "cm"), legend.key.height = unit(1, "cm"))+
+    theme(panel.background = element_rect(fill = "#C7E6F5", color = NA), 
+          plot.margin = margin(0, 0, 0, 0), panel.border = element_rect(colour = "black",
+          fill = NA, linewidth = 1))+
+    coord_sf(xlim = XLIM, ylim = YLIM, expand = FALSE)
+
+    if(LABEL_CITYS){
+      Plot <- Plot +
+        geom_shadowtext(data = NSW_urb_sel_pt2, aes(x = x, y = y , label = UCL_NAME16),
+                        size = 6, color = "black", bg.color = "grey90", bg.r = 0.13)+
+        geom_curve(data = NSW_urb_sel_pt2_seg_df %>% filter(UCL_NAME16 %in% c("Wagga Wagga", "Deniliquin")), aes(x = x, y = y, xend = xend, yend = yend), 
+              curvature = 0.2, linewidth = 0.3, color = "black", arrow = arrow(length = unit(0.15, "cm")))+
+        geom_curve(data = NSW_urb_sel_pt2_seg_df %>% filter(!UCL_NAME16 %in% c("Wagga Wagga", "Deniliquin")), aes(x = x, y = y, xend = xend, yend = yend), 
+              curvature = -0.3, linewidth = 0.3, color = "black", arrow = arrow(length = unit(0.15, "cm")))
+    }
+
+    if(North_arrow){
+      Plot <- Plot + 
+        ggspatial::annotation_north_arrow(location = "tr", which_north = "true",
+                            pad_x = unit(0.15, "cm"), pad_y = unit(1, "cm"), 
+                            height = unit(2, "cm"), width = unit(2, "cm"),
+                            style = ggspatial::north_arrow_fancy_orienteering(text_size =20, line_width = 1.5))
+      
+    }
+    if(Scale_bar){
+      Plot <- Plot + 
+        ggspatial::annotation_scale(width_hint = 0.25, style = "ticks", 
+                                  text_col = "black", line_col = "black",
+                                  pad_x = unit(0.25, "cm"), pad_y = unit(0.2, "cm"),
+                                  location = "bl", unit_category = "metric", line_width = 1.5, 
+                                  height = unit(0.5, "cm"), text_cex = 1.25, tick_height = 0.5)
+    }
+  
+  if(!is.null(FilenamePath_PNG)){
+    if(tools::file_ext(FilenamePath_PNG) != "png"){warning("Filename extension should be '.png'")}
+    ggsave(FilenamePath_PNG, Plot, width = PNG_width, height = PNG_height, dpi = PNG_dpi)
+  }
+  return(Plot)
+}
 
 # Function to plot Maps with Insets deforestation risk / Koala habitat loss ----
 #' @param DATA Spatial polygon data with deforestation risk or Koala habitat loss risk for each polygon
@@ -1179,7 +1430,9 @@ Get_cov_coeff_long <- function(ClearType, OUTPUT_DIR) {
 #' @param PNG_height Height of the PNG file
 #' @param PNG_dpi DPI of the PNG file
 PLOTMAP_risk_with_3Insets <- function(DATA, FILL, LEGEND_Title = "Koala habitat\nloss risk", 
-                                     Inset_BL, Inset_dim = 100000, COLOUR = hcl.colors(8, palette = "Reds 3" ,rev = TRUE),
+                                     Inset_BL, Inset_dim = 100000, 
+                                     COLOUR = hcl.colors(8, palette = "Reds 3" ,rev = TRUE),
+                                     SCALE_LIMIT = c(0,1), SCALE_BREAKS = NULL, SCALE_LABELS = NULL,
                                      URB_PT_SUB1, URB_PT_SUB2,  URB_PT_SUB3, 
                                      FilenamePath_PNG = NULL, PNG_width = 11, PNG_height = 11, PNG_dpi = 300){
   
@@ -1188,7 +1441,10 @@ PLOTMAP_risk_with_3Insets <- function(DATA, FILL, LEGEND_Title = "Koala habitat\
     geom_sf(data = STE, fill = "grey70", color = "white", lwd = 0.2)+
     
     geom_sf(data = DATA, aes(fill = {{FILL}}), color = NA)+
-    scale_fill_gradientn(colours = COLOUR, name = LEGEND_Title)+
+    scale_fill_gradientn(colours = COLOUR, name = LEGEND_Title, 
+                      limits = SCALE_LIMIT, oob = scales::squish,
+                      breaks = if(!is.null(SCALE_BREAKS)){SCALE_BREAKS} else {waiver()},
+                      labels = if(!is.null(SCALE_LABELS)){SCALE_LABELS} else {waiver()})+
 
     geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.3, linetype= "dotdash")+
     geom_sf(data = STE, fill = "transparent", color = "grey10", lwd = 0.2)+
@@ -1210,8 +1466,8 @@ PLOTMAP_risk_with_3Insets <- function(DATA, FILL, LEGEND_Title = "Koala habitat\
     geom_text(data = data.frame(x = Inset_BL[2,1] + Inset_dim/2, y = Inset_BL[2,2] + Inset_dim/2), aes(x = x, y = y, label = "II"), size = 4, fontface = "bold", color = "black", bg.color = "grey90", bg.r = 0.05)+
     geom_text(data = data.frame(x = Inset_BL[3,1] + Inset_dim/2, y = Inset_BL[3,2] + Inset_dim/2), aes(x = x, y = y, label = "III"), size = 4, fontface = "bold", color = "black", bg.color = "grey90", bg.r = 0.05)+
     
-    ggspatial::annotation_scale(location = "bl", pad_y = unit(0.5, "cm"))+
-    ggspatial::annotation_north_arrow(location = "bl", which_north = "true", pad_y = unit(1, "cm"))+
+    ggspatial::annotation_scale(location = "bl", pad_y = unit(0.5, "cm"), pad_x = unit(1, "cm"))+
+    ggspatial::annotation_north_arrow(location = "bl", which_north = "true", pad_y = unit(1, "cm"), pad_x = unit(1.25, "cm"))+
     theme_void() + 
     theme(axis.ticks.x = element_blank(),axis.text.x = element_blank(), axis.line.x = element_blank())+
     theme(axis.ticks.y = element_blank(),axis.text.y = element_blank(), axis.line.y = element_blank())+
@@ -1227,7 +1483,11 @@ PLOTMAP_risk_with_3Insets <- function(DATA, FILL, LEGEND_Title = "Koala habitat\
     
     geom_sf(data = DATA, aes(fill = {{FILL}}), color = NA)+
     # geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.2)+
-    scale_fill_gradientn(colours = COLOUR, name = LEGEND_Title)+
+    scale_fill_gradientn(colours = COLOUR, name = LEGEND_Title, 
+                      limits = SCALE_LIMIT, oob = scales::squish,
+                      breaks = if(!is.null(SCALE_BREAKS)){SCALE_BREAKS} else {waiver()},
+                      labels = if(!is.null(SCALE_LABELS)){SCALE_LABELS} else {waiver()})+
+
     geom_sf(data = KMR_shp, fill = NA, color = "grey20", lwd = 0.2, linetype= "dotdash")+
     
     # start a new scale
@@ -1254,7 +1514,10 @@ PLOTMAP_risk_with_3Insets <- function(DATA, FILL, LEGEND_Title = "Koala habitat\
     
     geom_sf(data = DATA, aes(fill = {{FILL}}), color = NA)+
     # geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.2)+
-    scale_fill_gradientn(colours = COLOUR, name = LEGEND_Title)+
+    scale_fill_gradientn(colours = COLOUR, name = LEGEND_Title, 
+                      limits = SCALE_LIMIT, oob = scales::squish,
+                      breaks = if(!is.null(SCALE_BREAKS)){SCALE_BREAKS} else {waiver()},
+                      labels = if(!is.null(SCALE_LABELS)){SCALE_LABELS} else {waiver()})+
     geom_sf(data = KMR_shp, fill = NA, color = "grey20", lwd = 0.2, linetype= "dotdash")+
     
     # start a new scale
@@ -1281,7 +1544,10 @@ PLOTMAP_risk_with_3Insets <- function(DATA, FILL, LEGEND_Title = "Koala habitat\
     
     geom_sf(data = DATA, aes(fill = {{FILL}}), color = NA)+
     # geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.2)+
-    scale_fill_gradientn(colours = COLOUR, name = LEGEND_Title)+
+    scale_fill_gradientn(colours = COLOUR, name = LEGEND_Title, 
+                      limits = SCALE_LIMIT, oob = scales::squish,
+                      breaks = if(!is.null(SCALE_BREAKS)){SCALE_BREAKS} else {waiver()},
+                      labels = if(!is.null(SCALE_LABELS)){SCALE_LABELS} else {waiver()})+
     geom_sf(data = KMR_shp, fill = NA, color = "grey20", lwd = 0.2, linetype= "dotdash")+
     
     # start a new scale
@@ -1541,6 +1807,607 @@ PLOTMAP_risk_with_6Insets <- function(DATA_ALL, FILL_ALL,
 #################################################################################################################################################################
 # Functions that are not needed for this project but kept for future reference ----
 
+
+# function to fit model with additional control for debugging and informative prior----
+#' @param KMR text field for KMR - one of "CC", "CST", "DRP", "FW", "NC", "NT", "NS", "R", "SC"
+#' @param ClearType clearing type - one of 1 = agriculture, 2 = infrastructure, 3 = forestry
+#' @param SpatUnits spatial units as list of Spatvector objects (properties) for each KMR
+#' @param RespData response data consisting listr of clearing and woody vegetation data for each KMR
+#' @param CovsCD covariates for each spatial unit as a list for each KMR
+#' @param SA1sPoly SA1s spatial representation as a list of Spatvector objectd for each KMR
+#' @param Explanatory covariates to include in model - either "All" or a vector of covariate names
+#' @param Verbose logical to print progress
+#' @param NMod_TOLN tolerance for INLA model fitting (passed to INLA_with_Retry)
+#' @param N_retry number of retries for INLA model fitting (passed to INLA_with_TimeLimit)
+#' @param N_rerun number of reruns for INLA model fitting (passed to INLArerun_with_Retry)
+#' @param Initial_Tlimit initial time limit for INLA model fitting (passed to INLA_with_Retry)
+#' @param OutputDir directory to save model output (optional)
+fit_model3 <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD, SA1sPoly = SA1s, 
+                       Explanatory = "All", Verbose = TRUE, RandEff = NULL, 
+                       ReFit = TRUE, NMod_TOLN = 0.005 , N_retry=3, N_rerun = 0, 
+                       Initial_Tlimit = 1000, OutputDir = NULL) {
+  # get attribute table of spatial units and join covariates
+  Covs <- SpatUnits[[KMR]] %>% st_drop_geometry() %>% as_tibble() %>% dplyr::select(-KMR) %>% bind_cols(CovsCD[[KMR]])
+  
+  # get response data and ensure clearing is < woody vegetation
+  Response <- RespData[[KMR]] %>% mutate(YAg = sum.aloss, YIn = sum.iloss, YFo = sum.floss, N = sum.woody) %>%
+    mutate(N = ifelse(N < YAg + YIn + YFo, YAg + YIn + YFo, N)) %>% dplyr::select(-sum.aloss, -sum.iloss, -sum.floss, -sum.woody)
+  
+  # set up data for INLA models
+  # response - how many cells cleared over time period
+  if (ClearType == 1) {
+    R <- Response %>% dplyr::select(YAg) %>% as.matrix()
+  } else if (ClearType == 2) {
+    R <- Response %>% dplyr::select(YIn) %>% as.matrix()
+  } else if (ClearType == 3) {
+    R <- Response %>% dplyr::select(YFo) %>% as.matrix()
+  }
+  
+  # number of trials - how many cells woody at start of time period
+  NT <- Response %>% dplyr::select(N) %>% as.matrix()
+  
+  # probability of clearing model
+  
+  # format data for model fitting
+  RP <- R[which(NT > 0)] # only fit to data for properties with woody vegetation in 2011
+  RP <- as.vector(ifelse(RP > 0, 1, 0)) # recode to binary cleared/not cleared
+  NTP <- rep(1, length(RP)) # set number of trials to 1 for all properties in 2011
+  ResponseP <- as_tibble(cbind(RP, NTP))
+  names(ResponseP) <- c("P", "Ntrials")
+  CP <- Covs[which(NT > 0), ] # only fit to data for properties with woody vegetation
+  CP <- CP %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
+  DataP <- bind_cols(ResponseP, CP)
+  ExplV_All <- paste(names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse=" + ")
+  ExplV <- if(Explanatory == "All") {ExplV_All} else {paste(Explanatory)}
+  
+  # get adjacency matrix for SA1s containing properties with forest cover
+  SA1IDs <- CP %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
+  SA1sPolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
+  Adj <- get_adjacency(SpatialUnits = SA1sPolyKMR, Name = paste0("modelP_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
+      FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
+
+  # fit clearing versus no clearing model
+  if(ReFit){ ## fit a full model first to get estimates for priors
+    formula <- as.formula(paste0(paste("P", ExplV_All, sep=" ~ "), " + ", RandEff))
+    FullResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataP, family = "binomial", 
+                                  Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                                  control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    ## extract fixed effects estimates to use as priors
+    Fixed_mean <- setNames(c(FullResultP$summary.fixed[(2:nrow(FullResultP$summary.fixed)),1], 0), c(rownames(FullResultP$summary.fixed)[2:nrow(FullResultP$summary.fixed)], "default"))
+    Fixed_prec <- setNames(1/((c(FullResultP$summary.fixed[(2:nrow(FullResultP$summary.fixed)),2], 0.001)^2)*10), c(rownames(FullResultP$summary.fixed)[2:nrow(FullResultP$summary.fixed)], "default"))
+    Prior_mean <- Fixed_mean[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_mean))]
+    Prior_prec <- Fixed_prec[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_prec))]
+    ## fit final model with priors
+    formula <- as.formula(paste0(paste("P", ExplV, sep=" ~ "), " + ", RandEff))
+    ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataP, family = "binomial", 
+                               Ntrials = Ntrials, control.fixed = list(mean = Prior_mean, prec = Prior_prec), control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                               control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+  } else { # fit model with default priors
+    formula <- as.formula(paste0(paste("P", ExplV, sep=" ~ "), " + ", RandEff))
+    ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula = formula, data = DataP, family = "binomial", 
+                               Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                               control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+  }
+
+  # proportion cleared|clearing model
+  ## format data for model fitting
+  RN <- R[which(R > 0)] # only fit to data from properties with some clearing
+  NTN <- NT[which(R > 0)] # only fit to data from properties with some clearing
+  ResponseN <- as_tibble(cbind(as.matrix(RN), as.matrix(NTN))) %>% mutate(Prop = RN / NTN) %>% mutate(Prop = ifelse(Prop < 1, Prop, 0.999)) # calculate the proportion cleared (when proportion = 1 set to 0.999)
+  names(ResponseN) <- c("N", "Ntrials", "Prop")
+  CN <- Covs[which(R > 0), ] # only fit to data from properties with some clearing
+  CN <- CN %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
+  DataN <- bind_cols(ResponseN, CN)
+  
+  # fit proportion cleared|clearing model
+  if(ReFit){ ## fit a full model first to get estimates for priors
+    formula <- as.formula(paste0(paste("Prop", ExplV_All, sep=" ~ "), " + ", RandEff))
+    FullResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    ## extract fixed effects estimates to use as priors
+    Fixed_mean <- setNames(c(FullResultN$summary.fixed[(2:nrow(FullResultN$summary.fixed)),1], 0), c(rownames(FullResultN$summary.fixed)[2:nrow(FullResultN$summary.fixed)], "default"))
+    Fixed_prec <- setNames(1/((c(FullResultN$summary.fixed[(2:nrow(FullResultN$summary.fixed)),2], 0.001)^2)*10), c(rownames(FullResultN$summary.fixed)[2:nrow(FullResultN$summary.fixed)], "default"))
+    Prior_mean <- Fixed_mean[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_mean))]
+    Prior_prec <- Fixed_prec[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_prec))]
+    ## fit final model with priors
+    formula <- as.formula(paste0(paste("Prop", ExplV, sep=" ~ "), " + ", RandEff))
+    ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta", 
+                               control.fixed = list(mean = Prior_mean, prec = Prior_prec), control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), 
+                               control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
+  } else { # fit model with default priors
+    
+    formula <- as.formula(paste0(paste("Prop", ExplV, sep=" ~ "), " + ", RandEff))
+
+    ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta",
+                               control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), 
+                               control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    
+    if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
+  }
+
+  # return models
+  if(!is.null(OutputDir)){
+    Model <- list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly)
+    output_FPath <- file.path(OutputDir, paste0("Model_", KMR, "_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, ".qs2"))
+    qs_save(Model, file = output_FPath)
+  }
+  return(list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly))
+}
+
+
+
+#' function to fit model with additional control for debugging----
+#' @param KMR text field for KMR - one of "CC", "CST", "DRP", "FW", "NC", "NT", "NS", "R", "SC"
+#' @param ClearType clearing type - one of 1 = agriculture, 2 = infrastructure, 3 = forestry
+#' @param SpatUnits spatial units as list of Spatvector objects (properties) for each KMR
+#' @param RespData response data consisting listr of clearing and woody vegetation data for each KMR
+#' @param CovsCD covariates for each spatial unit as a list for each KMR
+#' @param SA1sPoly SA1s spatial representation as a list of Spatvector objectd for each KMR
+#' @param Explanatory covariates to include in model - either "All" or a vector of covariate names
+#' @param Verbose logical to print progress
+#' @param NMod_TOLN tolerance for INLA model fitting (passed to INLA_with_Retry)
+#' @param N_retry number of retries for INLA model fitting (passed to INLA_with_TimeLimit)
+#' @param N_rerun number of reruns for INLA model fitting (passed to INLArerun_with_Retry)
+#' @param Initial_Tlimit initial time limit for INLA model fitting (passed to INLA_with_Retry)
+#' @param OutputDir directory to save model output (optional)
+#' @return list containing fitted models and input data
+fit_model <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD, SA1sPoly = SA1s, Explanatory = "All", Verbose = TRUE, NMod_TOLN = 0.005 , N_retry=3, N_rerun = 0, Initial_Tlimit = 1000, OutputDir = NULL) {  
+
+  # get attribute table of spatial units and join covariates
+  Covs <- SpatUnits[[KMR]] %>% st_drop_geometry() %>% as_tibble() %>% dplyr::select(-KMR) %>% bind_cols(CovsCD[[KMR]])
+  
+  # get response data and ensure clearing is < woody vegetation
+  Response <- RespData[[KMR]] %>% mutate(YAg = sum.aloss, YIn = sum.iloss, YFo = sum.floss, N = sum.woody) %>%
+    mutate(N = ifelse(N < YAg + YIn + YFo, YAg + YIn + YFo, N)) %>% dplyr::select(-sum.aloss, -sum.iloss, -sum.floss, -sum.woody)
+  
+  # set up data for INLA models
+  # response - how many cells cleared over time period
+  if (ClearType == 1) {
+    R <- Response %>% dplyr::select(YAg) %>% as.matrix()
+  } else if (ClearType == 2) {
+    R <- Response %>% dplyr::select(YIn) %>% as.matrix()
+  } else if (ClearType == 3) {
+    R <- Response %>% dplyr::select(YFo) %>% as.matrix()
+  }
+  
+  # number of trials - how many cells woody at start of time period
+  NT <- Response %>% dplyr::select(N) %>% as.matrix()
+  
+  # probability of clearing model
+  # format data for model fitting
+  RP <- R[which(NT > 0)] # only fit to data for properties with woody vegetation in 2011
+  RP <- as.vector(ifelse(RP > 0, 1, 0)) # recode to binary cleared/not cleared
+  NTP <- rep(1, length(RP)) # set number of trials to 1 for all properties in 2011
+  ResponseP <- as_tibble(cbind(RP, NTP))
+  names(ResponseP) <- c("P", "Ntrials")
+  CP <- Covs[which(NT > 0), ] # only fit to data for properties with woody vegetation
+  CP <- CP %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
+  DataP <- bind_cols(ResponseP, CP)
+  ExplV <- if(Explanatory == "All") {paste(names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse=" + ")} else {paste(Explanatory)}
+  
+  # get adjacency matrix for SA1s containing properties with forest cover
+  SA1IDs <- CP %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
+  SA1sPolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
+  Adj <- SA1sPolyKMR %>% 
+    get_adjacency(SpatialUnits =. , Name = paste0("modelP_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
+      FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
+  
+  # fit clearing versus no clearing model
+  formula <- as.formula(paste0(paste("P", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
+  ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataP, family = "binomial", Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+
+  # proportion cleared|clearing model
+  # format data for model fitting
+  RN <- R[which(R > 0)] # only fit to data from properties with some clearing
+  NTN <- NT[which(R > 0)] # only fit to data from properties with some clearing
+  ResponseN <- as_tibble(cbind(as.matrix(RN), as.matrix(NTN))) %>% mutate(Prop = RN / NTN) %>% mutate(Prop = ifelse(Prop < 1, Prop, 0.999)) # calculate the proportion cleared (when proportion = 1 set to 0.999)
+  names(ResponseN) <- c("N", "Ntrials", "Prop")
+  CN <- Covs[which(R > 0), ] # only fit to data from properties with some clearing
+  CN <- CN %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
+  DataN <- bind_cols(ResponseN, CN)
+  
+  # get adjacency matrix for SA1s containing properties with some clearing
+  SA1IDs <- CN %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
+  SA1sPolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
+  Adj <- SA1sPolyKMR %>% 
+    get_adjacency(SpatialUnits =. , Name = paste0("modelN_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
+      FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
+  
+  # fit proportion cleared|clearing model
+  formula <- as.formula(paste0(paste("Prop", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
+  ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+  if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
+
+  # return models
+  if(!is.null(OutputDir)){
+    Model <- list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly)
+    output_FPath <- file.path(OutputDir, paste0("Model_", KMR, "_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, ".qs2"))
+    qs_save(Model, file = output_FPath)
+  }
+  return(list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly))
+}
+
+
+# function to fit model with additional control for debugging and informative prior----
+#' @param KMR text field for KMR - one of "CC", "CST", "DRP", "FW", "NC", "NT", "NS", "R", "SC"
+#' @param ClearType clearing type - one of 1 = agriculture, 2 = infrastructure, 3 = forestry
+#' @param SpatUnits spatial units as list of Spatvector objects (properties) for each KMR
+#' @param RespData response data consisting listr of clearing and woody vegetation data for each KMR
+#' @param CovsCD covariates for each spatial unit as a list for each KMR
+#' @param SA1sPoly SA1s spatial representation as a list of Spatvector objectd for each KMR
+#' @param Explanatory covariates to include in model - either "All" or a vector of covariate names
+#' @param Verbose logical to print progress
+#' @param NMod_TOLN tolerance for INLA model fitting (passed to INLA_with_Retry)
+#' @param N_retry number of retries for INLA model fitting (passed to INLA_with_TimeLimit)
+#' @param N_rerun number of reruns for INLA model fitting (passed to INLArerun_with_Retry)
+#' @param Initial_Tlimit initial time limit for INLA model fitting (passed to INLA_with_Retry)
+#' @param OutputDir directory to save model output (optional)
+fit_model_bym2 <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD, SA1sPoly = SA1s, 
+                       Explanatory = "All", Verbose = TRUE, 
+                       ReFit = TRUE, NMod_TOLN = 0.005 , N_retry=3, N_rerun = 0, 
+                       Initial_Tlimit = 1000, OutputDir = NULL) {
+  # get attribute table of spatial units and join covariates
+  Covs <- SpatUnits[[KMR]] %>% st_drop_geometry() %>% as_tibble() %>% dplyr::select(-KMR) %>% bind_cols(CovsCD[[KMR]])
+  
+  # get response data and ensure clearing is < woody vegetation
+  Response <- RespData[[KMR]] %>% mutate(YAg = sum.aloss, YIn = sum.iloss, YFo = sum.floss, N = sum.woody) %>%
+    mutate(N = ifelse(N < YAg + YIn + YFo, YAg + YIn + YFo, N)) %>% dplyr::select(-sum.aloss, -sum.iloss, -sum.floss, -sum.woody)
+  
+  # set up data for INLA models
+  # response - how many cells cleared over time period
+  if (ClearType == 1) {
+    R <- Response %>% dplyr::select(YAg) %>% as.matrix()
+  } else if (ClearType == 2) {
+    R <- Response %>% dplyr::select(YIn) %>% as.matrix()
+  } else if (ClearType == 3) {
+    R <- Response %>% dplyr::select(YFo) %>% as.matrix()
+  }
+  
+  # number of trials - how many cells woody at start of time period
+  NT <- Response %>% dplyr::select(N) %>% as.matrix()
+  
+  # probability of clearing model
+  
+  # format data for model fitting
+  RP <- R[which(NT > 0)] # only fit to data for properties with woody vegetation in 2011
+  RP <- as.vector(ifelse(RP > 0, 1, 0)) # recode to binary cleared/not cleared
+  NTP <- rep(1, length(RP)) # set number of trials to 1 for all properties in 2011
+  ResponseP <- as_tibble(cbind(RP, NTP))
+  names(ResponseP) <- c("P", "Ntrials")
+  CP <- Covs[which(NT > 0), ] # only fit to data for properties with woody vegetation
+  CP <- CP %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
+  DataP <- bind_cols(ResponseP, CP)
+  ExplV_All <- paste(names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse=" + ")
+  ExplV <- if(Explanatory == "All") {ExplV_All} else {paste(Explanatory)}
+  
+  # get adjacency matrix for SA1s containing properties with forest cover
+  SA1IDs <- CP %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
+  SA1sPolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
+  Adj <- get_adjacency(SpatialUnits = SA1sPolyKMR, Name = paste0("modelP_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
+      FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
+
+  # fit clearing versus no clearing model
+  if(ReFit){ ## fit a full model first to get estimates for priors
+    formula <- as.formula(paste0(paste("P", 1, sep=" ~ "), " + f(SA1ID, model = 'bym2', graph = Adj, scale.model = TRUE)"))
+    NullP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula = formula, data = DataP, family = "binomial", 
+                               Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                               control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    U <- 1/(sqrt(NullP$summary.hyperpar["Precision for SA1ID", "0.5quant"]))
+    init_prec <- log(NullP$summary.hyperpar["Precision for SA1ID", "0.5quant"])
+    init_phi <- NullP$summary.hyperpar["Phi for SA1ID", "0.5quant"]
+    BYM2_prior  <-  list(prec = list(prior = "pc.prec", param = c(0.7, 0.01), initial = init_prec), phi = list(prior = "pc", param = c(0.5, 0.5), initial = init_phi))
+    formula <- as.formula(paste0(paste("P", ExplV_All, sep=" ~ "), " + f(SA1ID, model = 'bym2', hyper = BYM2_prior, graph = Adj, scale.model = TRUE)"))
+    FullResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataP, family = "binomial", 
+                                  Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                                  control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    ## extract fixed effects estimates to use as priors
+    Fixed_mean <- setNames(c(FullResultP$summary.fixed[(2:nrow(FullResultP$summary.fixed)),1], 0), c(rownames(FullResultP$summary.fixed)[2:nrow(FullResultP$summary.fixed)], "default"))
+    Fixed_prec <- setNames(1/((c(FullResultP$summary.fixed[(2:nrow(FullResultP$summary.fixed)),2], 0.001)^2)*10), c(rownames(FullResultP$summary.fixed)[2:nrow(FullResultP$summary.fixed)], "default"))
+    Prior_mean <- Fixed_mean[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_mean))]
+    Prior_prec <- Fixed_prec[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_prec))]
+    ## fit final model with priors
+    formula <- as.formula(paste0(paste("P", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym2', hyper = BYM2_prior, graph = Adj, scale.model = TRUE)"))
+    ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataP, family = "binomial", 
+                               Ntrials = Ntrials, control.fixed = list(mean = Prior_mean, prec = Prior_prec), control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                               control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+  } else {
+    formula <- as.formula(paste0(paste("P", 1, sep=" ~ "), " + f(SA1ID, model = 'bym2', graph = Adj, scale.model = TRUE)"))
+    NullP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula = formula, data = DataP, family = "binomial", 
+                               Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                               control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    U <- 1/(sqrt(NullP$summary.hyperpar["Precision for SA1ID", "0.5quant"]))
+    init_prec <- log(NullP$summary.hyperpar["Precision for SA1ID", "0.5quant"])
+    init_phi <- NullP$summary.hyperpar["Phi for SA1ID", "0.5quant"]
+    BYM2_prior  <-  list(prec = list(prior = "pc.prec", param = c(0.7, 0.01), initial = init_prec), phi = list(prior = "pc", param = c(0.5, 0.5), initial = init_phi))
+    formula <- as.formula(paste0(paste("P", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym2', hyper = BYM2_prior, graph = Adj, scale.model = TRUE)"))
+    ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula = formula, data = DataP, family = "binomial", 
+                               Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                               control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+  }
+
+  # proportion cleared|clearing model
+  ## format data for model fitting
+  RN <- R[which(R > 0)] # only fit to data from properties with some clearing
+  NTN <- NT[which(R > 0)] # only fit to data from properties with some clearing
+  ResponseN <- as_tibble(cbind(as.matrix(RN), as.matrix(NTN))) %>% mutate(Prop = RN / NTN) %>% mutate(Prop = ifelse(Prop < 1, Prop, 0.999)) # calculate the proportion cleared (when proportion = 1 set to 0.999)
+  names(ResponseN) <- c("N", "Ntrials", "Prop")
+  CN <- Covs[which(R > 0), ] # only fit to data from properties with some clearing
+  CN <- CN %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
+  DataN <- bind_cols(ResponseN, CN)
+  
+  ## get adjacency matrix for SA1s containing properties with some clearing
+  SA1IDs <- CN %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
+  SA1sPolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
+  Adj <- get_adjacency(SpatialUnits = SA1sPolyKMR, Name = paste0("modelN_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
+      FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
+
+  # fit proportion cleared|clearing model
+  if(ReFit){ ## fit a full model first to get estimates for priors
+    formula <- as.formula(paste0(paste("Prop", 1, sep=" ~ "), " + f(SA1ID, model = 'bym2', graph = Adj, scale.model = TRUE)"))
+    NullN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula = formula, data = DataN, family = "beta", 
+                               control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                               control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    U <- 1/(sqrt(NullN$summary.hyperpar["Precision for SA1ID", "0.5quant"]))
+    init_prec <- log(NullN$summary.hyperpar["Precision for SA1ID", "0.5quant"])
+    init_phi <- NullN$summary.hyperpar["Phi for SA1ID", "0.5quant"] 
+    BYM2_prior  <-  list(prec = list(prior = "pc.prec", param = c(U, 0.01), initial = init_prec), phi = list(prior = "pc", param = c(0.5, 0.5), initial = init_phi))
+    formula <- as.formula(paste0(paste("Prop", ExplV_All, sep=" ~ "), " + f(SA1ID, model = 'bym2', hyper = BYM2_prior, graph = Adj, scale.model = TRUE)"))
+    FullResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta", control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    
+    ## extract fixed effects estimates to use as priors
+    Fixed_mean <- setNames(c(FullResultN$summary.fixed[(2:nrow(FullResultN$summary.fixed)),1], 0), c(rownames(FullResultN$summary.fixed)[2:nrow(FullResultN$summary.fixed)], "default"))
+    Fixed_prec <- setNames(1/((c(FullResultN$summary.fixed[(2:nrow(FullResultN$summary.fixed)),2], 0.001)^2)*10), c(rownames(FullResultN$summary.fixed)[2:nrow(FullResultN$summary.fixed)], "default"))
+    Prior_mean <- Fixed_mean[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_mean))]
+    Prior_prec <- Fixed_prec[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_prec))]
+    ## fit final model with priors
+    formula <- as.formula(paste0(paste("Prop", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym2', hyper = BYM2_prior, graph = Adj, scale.model = TRUE)"))
+    ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta", 
+                               control.fixed = list(mean = Prior_mean, prec = Prior_prec), control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), 
+                               control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    
+    if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
+  } else { # fit model with default priors
+    formula <- as.formula(paste0(paste("Prop", 1, sep=" ~ "), " + f(SA1ID, model = 'bym2', graph = Adj, scale.model = TRUE)"))
+    NullN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula = formula, data = DataN, family = "beta", 
+                               control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                               control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    U <- 1/(sqrt(NullN$summary.hyperpar["Precision for SA1ID", "0.5quant"]))
+    init_prec <- log(NullN$summary.hyperpar["Precision for SA1ID", "0.5quant"])
+    init_phi <- NullN$summary.hyperpar["Phi for SA1ID", "0.5quant"] 
+    BYM2_prior  <-  list(prec = list(prior = "pc.prec", param = c(U, 0.01), initial = init_prec), phi = list(prior = "pc", param = c(0.5, 0.5), initial = init_phi))
+    
+    formula <- as.formula(paste0(paste("Prop", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym2', hyper = BYM2_prior, graph = Adj, scale.model = TRUE)"))
+    ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta",
+                               control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), 
+                               control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    
+    if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
+  }
+
+  # return models
+  if(!is.null(OutputDir)){
+    Model <- list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly)
+    output_FPath <- file.path(OutputDir, paste0("Model_", KMR, "_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, ".qs2"))
+    qs_save(Model, file = output_FPath)
+  }
+  return(list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly))
+}
+
+# Function to convert BYM posterior precision for iid and spatial components to a prior loggamma parameters (a , b)
+MuSd2Gamma <- function(Mu, Sd){
+  Var <- Sd^2
+  a <- (Mu^2) / Var
+  b <- Mu / Var
+  return(c(a = a, b = b))
+}
+
+# function to fit model with additional control for debugging and informative prior----
+#' @param KMR text field for KMR - one of "CC", "CST", "DRP", "FW", "NC", "NT", "NS", "R", "SC"
+#' @param ClearType clearing type - one of 1 = agriculture, 2 = infrastructure, 3 = forestry
+#' @param SpatUnits spatial units as list of Spatvector objects (properties) for each KMR
+#' @param RespData response data consisting listr of clearing and woody vegetation data for each KMR
+#' @param CovsCD covariates for each spatial unit as a list for each KMR
+#' @param SA1sPoly SA1s spatial representation as a list of Spatvector objectd for each KMR
+#' @param Explanatory covariates to include in model - either "All" or a vector of covariate names
+#' @param Verbose logical to print progress
+#' @param NMod_TOLN tolerance for INLA model fitting (passed to INLA_with_Retry)
+#' @param N_retry number of retries for INLA model fitting (passed to INLA_with_TimeLimit)
+#' @param N_rerun number of reruns for INLA model fitting (passed to INLArerun_with_Retry)
+#' @param Initial_Tlimit initial time limit for INLA model fitting (passed to INLA_with_Retry)
+#' @param OutputDir directory to save model output (optional)
+fit_model_bym <- function(KMR, ClearType, SpatUnits = SUs, RespData = ZStats_Woody, CovsCD, SA1sPoly = SA1s, 
+                       Explanatory = "All", Verbose = TRUE, 
+                       ReFit = TRUE, NMod_TOLN = 0.005 , N_retry=3, N_rerun = 0, 
+                       Initial_Tlimit = 1000, OutputDir = NULL) {
+  # get attribute table of spatial units and join covariates
+  Covs <- SpatUnits[[KMR]] %>% st_drop_geometry() %>% as_tibble() %>% dplyr::select(-KMR) %>% bind_cols(CovsCD[[KMR]])
+  
+  # get response data and ensure clearing is < woody vegetation
+  Response <- RespData[[KMR]] %>% mutate(YAg = sum.aloss, YIn = sum.iloss, YFo = sum.floss, N = sum.woody) %>%
+    mutate(N = ifelse(N < YAg + YIn + YFo, YAg + YIn + YFo, N)) %>% dplyr::select(-sum.aloss, -sum.iloss, -sum.floss, -sum.woody)
+  
+  # set up data for INLA models
+  # response - how many cells cleared over time period
+  if (ClearType == 1) {
+    R <- Response %>% dplyr::select(YAg) %>% as.matrix()
+  } else if (ClearType == 2) {
+    R <- Response %>% dplyr::select(YIn) %>% as.matrix()
+  } else if (ClearType == 3) {
+    R <- Response %>% dplyr::select(YFo) %>% as.matrix()
+  }
+  
+  # number of trials - how many cells woody at start of time period
+  NT <- Response %>% dplyr::select(N) %>% as.matrix()
+  
+  # probability of clearing model
+  
+  # format data for model fitting
+  RP <- R[which(NT > 0)] # only fit to data for properties with woody vegetation in 2011
+  RP <- as.vector(ifelse(RP > 0, 1, 0)) # recode to binary cleared/not cleared
+  NTP <- rep(1, length(RP)) # set number of trials to 1 for all properties in 2011
+  ResponseP <- as_tibble(cbind(RP, NTP))
+  names(ResponseP) <- c("P", "Ntrials")
+  CP <- Covs[which(NT > 0), ] # only fit to data for properties with woody vegetation
+  CP <- CP %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
+  DataP <- bind_cols(ResponseP, CP)
+  ExplV_All <- paste(names(CP %>% dplyr::select(-SA1, -SUID, -SA1ID)), collapse=" + ")
+  ExplV <- if(Explanatory == "All") {ExplV_All} else {paste(Explanatory)}
+  
+  # get adjacency matrix for SA1s containing properties with forest cover
+  SA1IDs <- CP %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
+  SA1sPolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
+  Adj <- get_adjacency(SpatialUnits = SA1sPolyKMR, Name = paste0("modelP_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
+      FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
+
+  # fit clearing versus no clearing model
+  formula <- as.formula(paste0(paste("P", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
+  NullP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula = formula, data = DataP, family = "binomial", 
+                              Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                              control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+  mu_iid <- NullP$summary.hyperpar["Precision for SA1ID (iid component)", "mean"]
+  sd_iid <- NullP$summary.hyperpar["Precision for SA1ID (iid component)", "sd"]
+  mu_spa <- NullP$summary.hyperpar["Precision for SA1ID (spatial component)", "mean"]
+  sd_spa <- NullP$summary.hyperpar["Precision for SA1ID (spatial component)", "sd"]
+  # Check if any of the hyperparameter estimates are NA or zero, and if so, set them to a small positive value to avoid issues with the gamma distribution
+  if(any(is.na(c(mu_iid, sd_iid, mu_spa, sd_spa))) || any(c(mu_iid, sd_iid, mu_spa, sd_spa) <= 0)){
+    warning("One or more hyperparameter estimates are NA or non-positive. Setting them to a small positive value (0.001) to avoid issues with the gamma distribution.")
+    BYM_prior  <-  list(prec.unstruct = list(prior = "loggamma", param = c(1, 5e-4), initial = 4, fixed = FALSE), 
+                        prec.spatial = list(prior = "loggamma", param = c(1, 5e-4), initial = 4, fixed = FALSE))
+  } else{
+    iid_prior <- MuSd2Gamma(mu_iid, sd_iid*3)
+    spa_prior <- MuSd2Gamma(mu_spa, sd_spa*3)
+    init_iid <- log(NullP$summary.hyperpar["Precision for SA1ID (iid component)", "0.5quant"])
+    init_spa <- log(NullP$summary.hyperpar["Precision for SA1ID (spatial component)", "0.5quant"])
+
+    BYM_prior  <-  list(prec.unstruct = list(prior = "loggamma", param = c(iid_prior["a"], iid_prior["b"]), initial = init_iid, fixed = FALSE), 
+                        prec.spatial = list(prior = "loggamma", param = c(spa_prior["a"], spa_prior["b"]), initial = init_spa, fixed = FALSE))
+  }
+  formula <- as.formula(paste0(paste("P", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym', hyper = BYM_prior, graph = Adj, scale.model = TRUE)"))
+  ResultP <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula = formula, data = DataP, family = "binomial", 
+                              Ntrials = Ntrials, control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                              control.compute = list(dic = TRUE,config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+
+  # proportion cleared|clearing model
+  ## format data for model fitting
+  RN <- R[which(R > 0)] # only fit to data from properties with some clearing
+  NTN <- NT[which(R > 0)] # only fit to data from properties with some clearing
+  ResponseN <- as_tibble(cbind(as.matrix(RN), as.matrix(NTN))) %>% mutate(Prop = RN / NTN) %>% mutate(Prop = ifelse(Prop < 1, Prop, 0.999)) # calculate the proportion cleared (when proportion = 1 set to 0.999)
+  names(ResponseN) <- c("N", "Ntrials", "Prop")
+  CN <- Covs[which(R > 0), ] # only fit to data from properties with some clearing
+  CN <- CN %>% mutate(SA1ID = as.integer(factor(SA1))) # recode indices for SA1s for random-effect
+  DataN <- bind_cols(ResponseN, CN)
+  
+  ## get adjacency matrix for SA1s containing properties with some clearing
+  SA1IDs <- CN %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
+  SA1sPolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
+  Adj <- get_adjacency(SpatialUnits = SA1sPolyKMR, Name = paste0("modelN_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
+      FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
+
+  # fit proportion cleared|clearing model
+  if(ReFit){ ## fit a full model first to get estimates for priors
+    formula <- as.formula(paste0(paste("Prop", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
+    NullN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula = formula, data = DataN, family = "beta", 
+                               control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                               control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    mu_iid <- NullN$summary.hyperpar["Precision for SA1ID (iid component)", "mean"]
+    sd_iid <- NullN$summary.hyperpar["Precision for SA1ID (iid component)", "sd"]
+    mu_spa <- NullN$summary.hyperpar["Precision for SA1ID (spatial component)", "mean"]
+    sd_spa <- NullN$summary.hyperpar["Precision for SA1ID (spatial component)", "sd"]
+    # Check if any of the hyperparameter estimates are NA or zero, and if so, set them to a small positive value to avoid issues with the gamma distribution
+    if(any(is.na(c(mu_iid, sd_iid, mu_spa, sd_spa))) || any(c(mu_iid, sd_iid, mu_spa, sd_spa) <= 0)){
+      warning("One or more hyperparameter estimates are NA or non-positive. Setting them to a small positive value (0.001) to avoid issues with the gamma distribution.")
+      BYM_prior <- list(prec.unstruct = list(prior = "loggamma", param = c(1, 5e-4), initial = 4, fixed = FALSE), 
+                          prec.spatial = list(prior = "loggamma", param = c(1, 5e-4), initial = 4, fixed = FALSE))
+    } else{
+      iid_prior <- MuSd2Gamma(mu_iid, sd_iid*2)
+      spa_prior <- MuSd2Gamma(mu_spa, sd_spa*2)
+      init_iid <- log(NullN$summary.hyperpar["Precision for SA1ID (iid component)", "0.5quant"])
+      init_spa <- log(NullN$summary.hyperpar["Precision for SA1ID (spatial component)", "0.5quant"])
+
+      BYM_prior  <-  list(prec.unstruct = list(prior = "loggamma", param = c(iid_prior["a"], iid_prior["b"]), initial = init_iid, fixed = FALSE), 
+                          prec.spatial = list(prior = "loggamma", param = c(spa_prior["a"], spa_prior["b"]), initial = init_spa, fixed = FALSE))
+    }
+    
+    formula <- as.formula(paste0(paste("Prop", ExplV_All, sep=" ~ "), " + f(SA1ID, model = 'bym', hyper = BYM_prior, graph = Adj, scale.model = TRUE)"))
+    FullResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta",
+                               control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), 
+                               control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    
+    ## extract fixed effects estimates to use as priors
+    Fixed_mean <- setNames(c(FullResultN$summary.fixed[(2:nrow(FullResultN$summary.fixed)),1], 0), c(rownames(FullResultN$summary.fixed)[2:nrow(FullResultN$summary.fixed)], "default"))
+    Fixed_prec <- setNames(1/((c(FullResultN$summary.fixed[(2:nrow(FullResultN$summary.fixed)),2], 0.001)^2)*10), c(rownames(FullResultN$summary.fixed)[2:nrow(FullResultN$summary.fixed)], "default"))
+    Prior_mean <- Fixed_mean[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_mean))]
+    Prior_prec <- Fixed_prec[match(c(unlist(strsplit(ExplV, " + ", fixed=TRUE)), "default"), names(Fixed_prec))]
+    
+    ## fit final model with priors
+    formula <- as.formula(paste0(paste("Prop", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym', hyper = BYM_prior, graph = Adj, scale.model = TRUE)"))
+    ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta", 
+                               control.fixed = list(mean = Prior_mean, prec = Prior_prec), control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), 
+                               control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
+  } else { # fit model with default priors
+    formula <- as.formula(paste0(paste("Prop", 1, sep=" ~ "), " + f(SA1ID, model = 'bym', graph = Adj, scale.model = TRUE)"))
+    NullN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula = formula, data = DataN, family = "beta", 
+                               control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE)), 
+                               control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    mu_iid <- NullN$summary.hyperpar["Precision for SA1ID (iid component)", "mean"]
+    sd_iid <- NullN$summary.hyperpar["Precision for SA1ID (iid component)", "sd"]
+    mu_spa <- NullN$summary.hyperpar["Precision for SA1ID (spatial component)", "mean"]
+    sd_spa <- NullN$summary.hyperpar["Precision for SA1ID (spatial component)", "sd"]
+    # Check if any of the hyperparameter estimates are NA or zero, and if so, set them to a small positive value to avoid issues with the gamma distribution
+    if(any(is.na(c(mu_iid, sd_iid, mu_spa, sd_spa))) || any(c(mu_iid, sd_iid, mu_spa, sd_spa) <= 0)){
+      warning("One or more hyperparameter estimates are NA or non-positive. Setting them to a small positive value (0.001) to avoid issues with the gamma distribution.")
+      BYM_prior <- list(prec.unstruct = list(prior = "loggamma", param = c(1, 5e-4), initial = 4, fixed = FALSE), 
+                        prec.spatial = list(prior = "loggamma", param = c(1, 5e-4), initial = 4, fixed = FALSE))
+    } else{
+      iid_prior <- MuSd2Gamma(mu_iid, sd_iid*2)
+      spa_prior <- MuSd2Gamma(mu_spa, sd_spa*2)
+      init_iid <- log(NullN$summary.hyperpar["Precision for SA1ID (iid component)", "0.5quant"])
+      init_spa <- log(NullN$summary.hyperpar["Precision for SA1ID (spatial component)", "0.5quant"])
+
+      BYM_prior  <-  list(prec.unstruct = list(prior = "loggamma", param = c(iid_prior["a"], iid_prior["b"]), initial = init_iid, fixed = FALSE), 
+                          prec.spatial = list(prior = "loggamma", param = c(spa_prior["a"], spa_prior["b"]), initial = init_spa, fixed = FALSE))
+    }
+    
+    formula <- as.formula(paste0(paste("Prop", ExplV, sep=" ~ "), " + f(SA1ID, model = 'bym', hyper = BYM_prior, graph = Adj, scale.model = TRUE)"))
+    ResultN <- INLA_with_Retry(N_retry=N_retry, Initial_Tlimit = Initial_Tlimit, formula, data = DataN, family = "beta",
+                               control.inla = control.inla(control.vb = INLA::control.vb(enable = FALSE), tolerance = NMod_TOLN), 
+                               control.compute = list(dic = TRUE, config = TRUE), control.predictor = list(compute = TRUE, link = 1), verbose = Verbose)
+    
+    if(N_rerun > 0){ResultN <- INLArerun_with_Retry(Result = ResultN, N_RERUN_retry = N_rerun, Verbose = Verbose)}
+  }
+
+  # return models
+  if(!is.null(OutputDir)){
+    Model <- list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly)
+    output_FPath <- file.path(OutputDir, paste0("Model_", KMR, "_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, ".qs2"))
+    qs_save(Model, file = output_FPath)
+  }
+  return(list(PModel = ResultP, NModel = ResultN, KMR = KMR, ClearType = ClearType, SpatUnits = SpatUnits, RespData = RespData, CovsCD = CovsCD, SA1sPoly = SA1sPoly))
+}
+
+
+PREVIEW_KEY <- function(g, show_grid = FALSE) {
+  # Ensure we are drawing to an active device (httpgd should be current)
+  if (dev.cur() == 1) stop("No active device. Run hgd() first.")
+
+  grid.newpage()
+  pushViewport(viewport(clip = "inherit", x = 0.5, y = 0.5, width = 1, height = 1))  # important: your text is outside npc [0,1]
+
+  if (show_grid) {
+    xs <- seq(0, 1, by = 0.1)
+    ys <- seq(0, 1, by = 0.1)
+    for (x in xs) grid.lines(unit(c(x, x), "npc"), unit(c(0, 1), "npc"),
+                             gp = gpar(col = "grey90"))
+    for (y in ys) grid.lines(unit(c(0, 1), "npc"), unit(c(y, y), "npc"),
+                             gp = gpar(col = "grey90"))
+    grid.rect(gp = gpar(fill = NA, col = "grey60"))
+  }
+
+  grid.draw(g)
+  popViewport()
+}
+
 # function to generate zonal statistics----
 get_zonal <- function(ZonalLayer, Raster, Stat) {
   return(as_tibble(exact_extract(Raster, ZonalLayer, Stat)))
@@ -1742,7 +2609,7 @@ predict_model <- function(Model) {
   
   # get adjacency matrix for SA1s containing properties with some clearing
   SA1IDs <- CN %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
-  SA1PolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
+  SA1sPolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
   Adj <- SA1sPolyKMR %>% 
     get_adjacency(SpatialUnits =. , Name = paste0("modelN_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
       FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
@@ -1864,7 +2731,7 @@ predict_model2 <- function(Model, Verbose = FALSE, N_retry=10, Initial_Tlimit = 
   
   # get adjacency matrix for SA1s containing properties with some clearing
   SA1IDs <- CN %>% dplyr::select(SA1, SA1ID) %>% group_by(SA1) %>% summarise(SA1ID = first(SA1ID))
-  SA1PolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
+  SA1sPolyKMR <- SA1sPoly[[KMR]] %>% left_join(SA1IDs, join_by(SA1_CODE21 == SA1), keep = TRUE) %>% filter(!is.na(SA1ID)) %>% arrange(SA1ID)
   Adj <- SA1sPolyKMR %>% 
     get_adjacency(SpatialUnits =. , Name = paste0("modelN_", if (ClearType == 1) {"Ag_"} else if (ClearType == 2) {"In_"} else if (ClearType == 3) {"Fo_"} else {"Error"}, KMR, "_Adj_SA1s"), 
       FileLocation = paste0(OUTPUT_DIR, "/neighbours/"))
@@ -1899,54 +2766,7 @@ predict_model2 <- function(Model, Verbose = FALSE, N_retry=10, Initial_Tlimit = 
 }
 
 
-# Function to plot Single deforestation risk / Koala habitat loss ----
-#' @param DATA Spatial polygon data with deforestation risk or Koala habitat loss risk for each polygon
-#' @param FILL Variable name to be plotted
-#' @param LEGEND_Title Text for lebeling the legend
-#' @param ClearType 1 = Ag, 2 = In, 3 = Fo
-#' @param FilenamePath_PNG Directory to save the plot as a PNG file (optional) {set to NULL to not save}
-#' @param PNG_width Width of the PNG file
-#' @param PNG_height Height of the PNG file
-#' @param PNG_dpi DPI of the PNG file
-PLOTMAP_risk_NSW <- function(DATA, FILL, LEGEND_Title = "Deforestation\nrisk", ClearType = 1, FilenamePath_PNG = NULL, PNG_width = 11, PNG_height = 11, PNG_dpi = 300){
-  
-  CT <- if(ClearType == 1) {"Ag"} else if(ClearType == 2) {"In"} else if(ClearType == 3) {"Fo"} else {"Error"}
-  
-  # Plot the deforestation risk or Koala habitat loss risk
-  Plot <- ggplot()+
-    
-    geom_sf(data = STE, fill = "grey80", color = "white", lwd = 0.2)+
-    
-    geom_sf(data = DATA, aes(fill = {{FILL}}), color = NA)+
-    geom_sf(data = KMR_shp, fill = NA, color = "grey10", lwd = 0.2)+
-    scale_fill_gradientn(colours = hcl.colors(8, palette = "Blues 3" ,rev = TRUE), name = LEGEND_Title)+
-    
-    # start a new scale
-    new_scale_colour() +
-    
-    geom_sf(data = NSW_urb_sel_pt, colour = "red3", size = 1)+
-    geom_text_repel(data = NSW_urb_sel_pt, aes(x = x, y = y , label = UCL_NAME16), 
-                    fontface = "bold", nudge_y = -5, size = 3,
-                    color = "black",     # text color
-                    bg.color = "grey90", # shadow color
-                    bg.r = 0.05)+          # shadow radius
-    
-    ggspatial::annotation_scale(location = "br", pad_y = unit(1, "cm"))+
-    ggspatial::annotation_north_arrow(location = "br", which_north = "true", pad_y = unit(2, "cm"))+
-    
-    theme(axis.ticks.x = element_blank(),axis.text.x = element_blank(), axis.line.x = element_blank())+
-    theme(axis.ticks.y = element_blank(),axis.text.y = element_blank(), axis.line.y = element_blank())+
-    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
-    theme(legend.position = c(0.9, 0.3))+
-    theme(axis.title.x = element_blank(), axis.title.y = element_blank())+
-    coord_sf(xlim = st_bbox(KMR_shp)[c(1,3)], ylim = st_bbox(KMR_shp)[c(2,4)], expand = TRUE)
-  
-  if(!is.null(FilenamePath_PNG)){
-    if(tools::file_ext(FilenamePath_PNG) != "png"){warning("Filename extension should be '.png'")}
-    ggsave(FilenamePath_PNG, Plot, width = PNG_width, height = PNG_height, dpi = PNG_dpi)
-  }
-  return(Plot)
-}
+
 
 # Function to plot Maps with Insets deforestation risk / Koala habitat loss ----
 #' @param DATA Spatial polygon data with deforestation risk or Koala habitat loss risk for each polygon
