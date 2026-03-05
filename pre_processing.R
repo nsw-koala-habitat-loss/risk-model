@@ -8,16 +8,15 @@ gc() #free up memrory and report the memory usage.
 # load libraries
 library(sf)
 library(sp)
-library(raster)
 library(exactextractr)
 library(terra)
 library(tidyverse)
 library(furrr)
 library(spdep)
 library(readxl)
-options("max.print" = 999)
+options("max.print" = 99)
 library(qs)
-
+library(qs2)
 # load functions
 source("functions.R")
 
@@ -48,8 +47,8 @@ SUs <- imap(SUs, ~.x %>% mutate(Area = as.numeric(st_area(.)/ 1e4),
 do.call(rbind, SUs) %>% filter(Area < 0)
 
 # save processes spatial units
-saveRDS(SUs, file = file.path(OUTPUT_DIR, "spatial_units/sus.rds"))
-qsave(SUs, file = file.path(OUTPUT_DIR, "spatial_units/sus.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "spatial_units/sus.qs"))){file.remove(file.path(OUTPUT_DIR, "spatial_units/sus.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(SUs, file = file.path(OUTPUT_DIR, "spatial_units/sus.qs2"))
 
 # load SA1s spatial layer
 # note that these are the SA1s for the whole study area, not for each KMR
@@ -70,15 +69,15 @@ SA1s <- list(CC = SA1s_All[which(!is.na(left_join(SA1s_All, as_tibble(unique(SUs
 do.call(rbind, SA1s) %>% filter(if_all(everything(), is.na))
 
 # save processed SA1s
-saveRDS(SA1s, file = file.path(OUTPUT_DIR, "spatial_units/sa1s.rds"))
-qsave(SA1s, file = file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))){file.remove(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(SA1s, file = file.path(OUTPUT_DIR, "spatial_units/sa1s.qs2"))
 
 # get woody cover in 2011
 Woody <- terra::rast(file.path(INPUT_DIR, "woody_cover/woody_nsw.tif")) %>% round()
 
 # load woody loss rasters and create raster stack
 # get all tif files
-WLFiles <- list.files("./input/clearing_data", pattern = "\\.tif$", full.names = TRUE)
+WLFiles <- list.files(file.path(INPUT_DIR, "clearing_data"), pattern = "\\.tif$", full.names = TRUE)
 WLStack <- terra::rast(WLFiles) %>% round()
 
 # slpit into the different types of clearing
@@ -105,8 +104,8 @@ ZStats_Woody <- map2(.x = SUs, .y = CropRast, .f = get_zonal2, Stat = "sum")
 ZStats_Woody <- map(.x = ZStats_Woody, .f = round)
 
 # save data
-saveRDS(ZStats_Woody, file = file.path(OUTPUT_DIR, "data/ZStats_Woody.rds"))
-qsave(ZStats_Woody, file = file.path(OUTPUT_DIR, "data/ZStats_Woody.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "data/ZStats_Woody.qs"))){file.remove(file.path(OUTPUT_DIR, "data/ZStats_Woody.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(ZStats_Woody, file = file.path(OUTPUT_DIR, "data/ZStats_Woody.qs2"))
 
 ZStats_Woody_all <- do.call(rbind, ZStats_Woody)
 ZStats_Woody_all %>% filter(sum.woody < sum.Khab)
@@ -116,7 +115,7 @@ rm(list = setdiff(ls(all.names = TRUE), "SUs"))
 gc()
 
 ## Continuous covariate ---- 
-SUs <- qread(file.path(OUTPUT_DIR, "spatial_units/sus.qs"))
+SUs <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sus.qs2"))
 
 # # Load proposed covariates based on workshops from lookup xlsx
 # CovLookup <- readxl::read_xlsx(file.path(INPUT_DIR, "covariates/covariate_description.xlsx"), sheet = "AllLyr")
@@ -149,8 +148,8 @@ for (i in names(ZStats_CovsC)) {
 }
 
 # save data
-saveRDS(ZStats_CovsC, file = file.path(OUTPUT_DIR, "data/ZStats_CovsC.rds"))
-qsave(ZStats_CovsC, file = file.path(OUTPUT_DIR, "data/ZStats_CovsC.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "data/ZStats_CovsC.qs"))){file.remove(file.path(OUTPUT_DIR, "data/ZStats_CovsC.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(ZStats_CovsC, file = file.path(OUTPUT_DIR, "data/ZStats_CovsC.qs2"))
 
 # Clearing stroage and memory space before processing Discrete variables.
 # rm(list = ls(all.names = TRUE)) #will clear all objects includes hidden objects.
@@ -160,7 +159,7 @@ qsave(ZStats_CovsC, file = file.path(OUTPUT_DIR, "data/ZStats_CovsC.qs"), preset
 ## Discrete covariate ---- 
 # load functions
 source("functions.R")
-SUs <- qread(file.path(OUTPUT_DIR, "spatial_units/sus.qs"))
+SUs <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sus.qs2"))
 # SUs <- readRDS(file.path(OUTPUT_DIR, "spatial_units/sus.rds"))
 # Load proposed covariates based on workshops from lookup xlsx
 
@@ -172,10 +171,10 @@ CovsD <- c("PolPref", "NSW_LandTenure", "NSW_forten18_ForTen", "NSW_forten18_Ten
 CovsD_FPath <- file.path(INPUT_DIR, "covariates", paste0(CovsD, ".tif"))
 StackCovsD <- rast(CovsD_FPath)
 names(StackCovsD)[6] <- "NatVegReg"
-names(StackCovsD)
-plot(StackCovsD$Drought)
-plot(StackCovsD$Fire)
-plot(StackCovsD$LandTen)
+# names(StackCovsD)
+# plot(StackCovsD$Drought)
+# plot(StackCovsD$Fire)
+# plot(StackCovsD$LandTen)
 
 # save raster stack
 saveRDS(StackCovsD, file = file.path(OUTPUT_DIR, "raster_stacks/disc_covs.rds"))
@@ -193,5 +192,8 @@ for (i in names(ZStats_CovsD)) {
 }
 
 # save data
-saveRDS(ZStats_CovsD, file = file.path(OUTPUT_DIR, "data/ZStats_CovsD.rds"))
-qsave(ZStats_CovsD, file = file.path(OUTPUT_DIR, "data/ZStats_CovsD.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "data/ZStats_CovsD.qs"))){file.remove(file.path(OUTPUT_DIR, "data/ZStats_CovsD.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(ZStats_CovsD, file = file.path(OUTPUT_DIR, "data/ZStats_CovsD.qs2"))
+
+
+map(SUs, nrow)
