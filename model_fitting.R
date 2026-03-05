@@ -2,6 +2,7 @@
 # KOALA MODELLING REGION (KMR) IN NEW SOUTH WALES
 
 # load libraries
+options(future.globals.maxSize = 5000 * 1024^2) # change the default size of future.globals to 5GB
 library(sf)
 library(sp)
 library(terra)
@@ -15,24 +16,25 @@ library(confintr)
 library(readxl)
 library(tictoc)
 if(!require("qs")) install.packages("qs")
-library(qs)
+library(qs) # this is deprecited and most data files should have been progressively replaced with qs2 files for compatibility with the latest version of the package.
+library(qs2)
 library(furrr)
 library(ltm)
-options(max.print = 100)
+options(max.print = 99)
 
 # load functions
 source("functions.R")
 
 ## Note: change the path to the input and output directory
-INPUT_DIR <- file.path("D:/Data/NSW_Deforestation/risk-model/input")
-OUTPUT_DIR <- file.path("D:/Data/NSW_Deforestation/risk-model/output")
+INPUT_DIR <- file.path("D:", "Data", "NSW_Deforestation", "risk-model", "input")
+OUTPUT_DIR <- file.path("D:", "Data", "NSW_Deforestation", "risk-model", "output")
 
 # load Pre-processed data----
-ZStats_Woody <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody.qs"))
-ZStats_CovsC <- qread(file.path(OUTPUT_DIR, "data/ZStats_CovsC.qs"))
-ZStats_CovsD <- qread(file.path(OUTPUT_DIR, "data/ZStats_CovsD.qs"))
-SUs <- qread(file.path(OUTPUT_DIR, "spatial_units/sus.qs"))
-SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
+ZStats_Woody <- qs_read(file.path(OUTPUT_DIR, "data", "ZStats_Woody.qs2"))
+ZStats_CovsC <- qs_read(file.path(OUTPUT_DIR, "data", "ZStats_CovsC.qs2"))
+ZStats_CovsD <- qs_read(file.path(OUTPUT_DIR, "data", "ZStats_CovsD.qs2"))
+SUs <- qs_read(file.path(OUTPUT_DIR, "spatial_units", "sus.qs2"))
+SA1s <- qs_read(file.path(OUTPUT_DIR, "spatial_units", "sa1s.qs2"))
 
 ## Check all data has same number of rows
 walk(names(SUs), ~{
@@ -67,7 +69,8 @@ for (i in 1:length(names(ZStats_CovsC))) {
 }
 
 names(ZStats_Covs) <- names(ZStats_CovsC)
-qsave(ZStats_Covs, file = file.path(OUTPUT_DIR, "data/ZStats_Covs.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "data/ZStats_Covs.qs"))){file.remove(file.path(OUTPUT_DIR, "data/ZStats_Covs.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(ZStats_Covs, file = file.path(OUTPUT_DIR, "data/ZStats_Covs.qs2"))
 
 
 # CHECKING FOR MULTI-COLLINEARITY ----
@@ -76,7 +79,8 @@ qsave(ZStats_Covs, file = file.path(OUTPUT_DIR, "data/ZStats_Covs.qs"), preset =
 ## Continuous Covariates ----
 ZStats_CovsC_all <- do.call(rbind, ZStats_CovsC)
 Corr_Cont <- cor(ZStats_CovsC_all, use = "complete.obs")
-qsave(Corr_Cont, file = file.path(OUTPUT_DIR, "collinearity/Corr_Cont_matrix.qs"))
+if(file.exists(file.path(OUTPUT_DIR, "collinearity/Corr_Cont_matrix.qs"))){file.remove(file.path(OUTPUT_DIR, "collinearity/Corr_Cont_matrix.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(Corr_Cont, file = file.path(OUTPUT_DIR, "collinearity/Corr_Cont_matrix.qs2"))
 
 Corr_Cont_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = Corr_Cont, label = TRUE, hjust = 1, layout.exp = 2)+ 
   geom_point(size = 10, aes(color = coefficient > 0, alpha = abs(coefficient)> 0.5))+  ## highlight variables with correlations  > 0.5 OR < -0.5
@@ -98,19 +102,20 @@ for (i in 1:ncol(ZStats_CovsD_all)) {
     cramers_v_matrix[i,j] <- cramersv_val
   }
 }
-qsave(cramers_v_matrix, file = file.path(OUTPUT_DIR, "collinearity/CramersV_matrix.qs"))
+if(file.exists(file.path(OUTPUT_DIR, "collinearity/CramersV_matrix.qs"))){file.remove(file.path(OUTPUT_DIR, "collinearity/CramersV_matrix.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(cramers_v_matrix, file = file.path(OUTPUT_DIR, "collinearity/CramersV_matrix.qs2"))
 Corr_Categ_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = cramers_v_matrix, label = TRUE, hjust = 1, layout.exp = 2)+ 
   geom_point(size = 10, aes(color = coefficient > 0, alpha = abs(coefficient)> 0.5))+   ## highlight variables with correlations  > 0.5 OR < -0.5
   scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) + 
   guides(color = "none", alpha = "none")
-
+Corr_Categ_all_plot
 # Export correlation plot
 ggsave(Corr_Categ_all_plot, file = file.path(OUTPUT_DIR, "collinearity/Corr_Categ_all_plot.png"), width = 2000, height = 2000, units = "px")
 
 ## Remove covariates that are collinear ----
 ### Remove variables with correlations  > 0.6 OR < -0.6
-ZStats_Woody <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody.qs"))
-ZStats_Covs <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs.qs"))
+ZStats_Woody <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Woody.qs2"))
+ZStats_Covs <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Covs.qs2"))
 for (i in names(ZStats_Covs)) {
     ZStats_Covs[[i]] <- ZStats_Covs[[i]] %>% dplyr::select(-c(Elev, ForType))
 }
@@ -118,7 +123,7 @@ for (i in names(ZStats_Covs)) {
 # Select covariates for each clearing type----
 ## Agricultural Clearing ----
 
-SUs <- qread(file.path(OUTPUT_DIR, "spatial_units/sus.qs"))
+SUs <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sus.qs2"))
 SUs_Ag <- SUs_ZStats_Ag <- SUs 
 ZStats_Woody_Ag <- ZStats_Woody #%>% map(function(x)nrow(x))
 ZStats_Covs_Ag <- ZStats_Covs
@@ -209,13 +214,17 @@ Corr_CovD_Ag_all_plot
 ggsave(Corr_CovD_Ag_all_plot, file = file.path(OUTPUT_DIR, "collinearity/Corr_CovD_Ag_all_plot.png"), width = 2000, height = 2000, units = "px")
 
 #### Export data
-qsave(SUs_Ag, file = file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"))){file.remove(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(SUs_Ag, file = file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs2"))
 nrow(SUs_Ag %>% bind_rows())
-qsave(ZStats_Woody_Ag, file = file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs"))){file.remove(file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(ZStats_Woody_Ag, file = file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs2"))
 nrow(ZStats_Woody_Ag %>% bind_rows())
-qsave(ZStats_Covs_Ag, file = file.path(OUTPUT_DIR, "data/ZStats_Covs_Ag.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "data/ZStats_Covs_Ag.qs"))){file.remove(file.path(OUTPUT_DIR, "data/ZStats_Covs_Ag.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(ZStats_Covs_Ag, file = file.path(OUTPUT_DIR, "data/ZStats_Covs_Ag.qs2"))
 nrow(ZStats_Covs_Ag %>% bind_rows())
-qsave(ZStats_Khab_Ag, file = file.path(OUTPUT_DIR, "data/ZStats_Khab_Ag.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "data/ZStats_Khab_Ag.qs"))){file.remove(file.path(OUTPUT_DIR, "data/ZStats_Khab_Ag.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(ZStats_Khab_Ag, file = file.path(OUTPUT_DIR, "data/ZStats_Khab_Ag.qs2"))
 nrow(ZStats_Khab_Ag %>% bind_rows())
 
 ### Check for NAs in the data ----
@@ -240,7 +249,7 @@ NA_Pct
 
 ## Forestry Clearing ----
 
-SUs <- qread(file.path(OUTPUT_DIR, "spatial_units/sus.qs"))
+SUs <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sus.qs2"))
 SUs_Fo <- SUs_ZStats_Fo <- SUs 
 ZStats_Woody_Fo <- ZStats_Woody
 ZStats_Covs_Fo <- ZStats_Covs
@@ -323,21 +332,25 @@ for (i in 1:ncol(ZStats_CovsD_Fo_all)) {
 }
 
 #### Plot Cramers V matrix
-Corr_CovD_Ag_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = cramers_v_matrix, label = TRUE, hjust = 1, layout.exp = 2)+ 
+Corr_CovD_Fo_all_plot <- ggcorr(data = NULL, geom= "blank", cor_matrix = cramers_v_matrix, label = TRUE, hjust = 1, layout.exp = 2)+ 
   geom_point(size = 10, aes(color = coefficient > 0, alpha = abs(coefficient)> 0.5))+ 
   scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) + 
   guides(color = FALSE, alpha = FALSE)
-Corr_CovD_Ag_all_plot
-ggsave(Corr_CovD_Ag_all_plot, file = file.path(OUTPUT_DIR, "collinearity/Corr_CovD_Ag_all_plot.png"), width = 2000, height = 2000, units = "px")
+Corr_CovD_Fo_all_plot
+ggsave(Corr_CovD_Fo_all_plot, file = file.path(OUTPUT_DIR, "collinearity/Corr_CovD_Fo_all_plot.png"), width = 2000, height = 2000, units = "px")
 
 #### Export data
-qsave(SUs_Fo, file = file.path(OUTPUT_DIR, "spatial_units/sus_fo.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "spatial_units/SUs_Fo.qs"))){file.remove(file.path(OUTPUT_DIR, "spatial_units/SUs_Fo.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(SUs_Fo, file = file.path(OUTPUT_DIR, "spatial_units/sus_fo.qs2"))
 nrow(SUs_Fo %>% bind_rows())
-qsave(ZStats_Woody_Fo, file = file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs"))){file.remove(file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(ZStats_Woody_Fo, file = file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs2"))
 nrow(ZStats_Woody_Fo %>% bind_rows())
-qsave(ZStats_Covs_Fo, file = file.path(OUTPUT_DIR, "data/ZStats_Covs_Fo.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "data/ZStats_Covs_Fo.qs"))){file.remove(file.path(OUTPUT_DIR, "data/ZStats_Covs_Fo.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(ZStats_Covs_Fo, file = file.path(OUTPUT_DIR, "data/ZStats_Covs_Fo.qs2"))
 nrow(ZStats_Covs_Fo %>% bind_rows())
-qsave(ZStats_Khab_Fo, file = file.path(OUTPUT_DIR, "data/ZStats_Khab_Fo.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "data/ZStats_Khab_Fo.qs"))){file.remove(file.path(OUTPUT_DIR, "data/ZStats_Khab_Fo.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(ZStats_Khab_Fo, file = file.path(OUTPUT_DIR, "data/ZStats_Khab_Fo.qs2"))
 nrow(ZStats_Khab_Fo %>% bind_rows())
 
 
@@ -362,7 +375,7 @@ NA_Val
 NA_Pct
 
 ## Infrastructure Clearing ----
-SUs <- qread(file.path(OUTPUT_DIR, "spatial_units/sus.qs"))
+SUs <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sus.qs2"))
 SUs_In <- SUs_ZStats_In <- SUs
 ZStats_Woody_In <- ZStats_Woody
 ZStats_Covs_In <- ZStats_Covs
@@ -452,13 +465,17 @@ Corr_CovD_In_all_plot
 ggsave(Corr_CovD_In_all_plot, file = file.path(OUTPUT_DIR, "collinearity/Corr_CovD_In_all_plot.png"), width = 2000, height = 2000, units = "px")
 
 #### Export data
-qsave(SUs_In, file = file.path(OUTPUT_DIR, "spatial_units/sus_In.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "spatial_units/SUs_In.qs"))){file.remove(file.path(OUTPUT_DIR, "spatial_units/SUs_In.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(SUs_In, file = file.path(OUTPUT_DIR, "spatial_units/sus_In.qs2"))
 nrow(SUs_In %>% bind_rows())
-qsave(ZStats_Woody_In, file = file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs"))){file.remove(file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(ZStats_Woody_In, file = file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs2"))
 nrow(ZStats_Woody_In %>% bind_rows())
-qsave(ZStats_Covs_In, file = file.path(OUTPUT_DIR, "data/ZStats_Covs_In.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "data/ZStats_Covs_In.qs"))){file.remove(file.path(OUTPUT_DIR, "data/ZStats_Covs_In.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(ZStats_Covs_In, file = file.path(OUTPUT_DIR, "data/ZStats_Covs_In.qs2"))
 nrow(ZStats_Covs_In %>% bind_rows())
-qsave(ZStats_Khab_In, file = file.path(OUTPUT_DIR, "data/ZStats_Khab_In.qs"), preset = "fast")
+if(file.exists(file.path(OUTPUT_DIR, "data/ZStats_Khab_In.qs"))){file.remove(file.path(OUTPUT_DIR, "data/ZStats_Khab_In.qs"))} # replacing all qs with qs2 for compatibility
+qs_save(ZStats_Khab_In, file = file.path(OUTPUT_DIR, "data/ZStats_Khab_In.qs2"))
 nrow(ZStats_Khab_In %>% bind_rows())
 
 ### Check for NAs in the data ----
@@ -492,21 +509,21 @@ NA_Pct
 #### If DIC varies significantly in repeated runs, then we need to set custom priors
 ### Agricultural clearing in each KMR ----
 
-ZStats_Woody_Ag <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs"))
+ZStats_Woody_Ag <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs2"))
 nrow(ZStats_Woody_Ag %>% bind_rows())
-ZStats_Covs_Ag <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_Ag.qs"))
+ZStats_Covs_Ag <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Covs_Ag.qs2"))
 nrow(ZStats_Covs_Ag %>% bind_rows())
-SUs_Ag <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"))
+SUs_Ag <- qs_read(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs2"))
 nrow(SUs_Ag %>% bind_rows())
-SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
+SA1s <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs2"))
 KMRs <- names(SUs_Ag)
 
 ptm <- proc.time()
 for(kmr in KMRs){
   tic(paste0(kmr))
   cat(paste0("Running full model for: ", kmr, "\n"))
-  for(i in 1:10){
-    Model_Ag <- fit_model(KMR = kmr, ClearType = 1, SpatUnits = SUs_Ag, RespData = ZStats_Woody_Ag, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
+  for(i in 1:2){
+    Model_Ag <- fit_model2(KMR = kmr, ClearType = 1, SpatUnits = SUs_Ag, RespData = ZStats_Woody_Ag, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
     print(paste0(kmr, ":  DIC= " , round(Model_Ag$PModel$dic$dic + Model_Ag$NModel$dic$dic, 2)))
   }
   toc(log = TRUE)
@@ -514,11 +531,13 @@ for(kmr in KMRs){
 }
 proc.time() - ptm
 
+
+
 ### Forestry clearing in each KMR ----
-SUs_Fo <- qread(file.path(OUTPUT_DIR, "spatial_units/sus_fo.qs"))
-ZStats_Woody_Fo <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs"))
-ZStats_Covs_Fo <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_Fo.qs"))
-SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
+SUs_Fo <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sus_fo.qs2"))
+ZStats_Woody_Fo <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs2"))
+ZStats_Covs_Fo <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Covs_Fo.qs2"))
+SA1s <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs2"))
 KMRs <- names(SUs_Fo)
 # summary(ZStats_Woody_Fo$FW$sum.woody)
 ptm <- proc.time()
@@ -535,14 +554,12 @@ for(kmr in KMRs){
 proc.time() - ptm
 
 ### Infrastructure clearing in each KMR ----
-SUs_In <- qread(file.path(OUTPUT_DIR, "spatial_units/sus_In.qs"))
-ZStats_Woody_In <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs"))
-ZStats_Covs_In <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_In.qs"))
-SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
+SUs_In <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sus_In.qs2"))
+ZStats_Woody_In <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs2"))
+ZStats_Covs_In <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Covs_In.qs2"))
+SA1s <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs2"))
 KMRs <- names(SUs_In)
-# inla.setOption(num.threads="8:1")
-# map(ZStats_Covs_In, ~summary(.))
-
+#
 ptm <- proc.time()
 for(kmr in KMRs){
   tic(paste0(kmr))
@@ -555,7 +572,6 @@ for(kmr in KMRs){
   cat("\n\n")
 }
 proc.time() - ptm
-
 
 ## Try informative priors for Infrastructure clearing in SC KMR ----
 ### Model convergence issues in SC KMR for Infrastructure clearing
@@ -576,10 +592,10 @@ for(i in 1:20){
 
 ## Agricultural----
 ## Load data
-ZStats_Woody_Ag <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs"))
-ZStats_Covs_Ag <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_Ag.qs"))
-SUs_Ag <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"))
-SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
+ZStats_Woody_Ag <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs2"))
+ZStats_Covs_Ag <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Covs_Ag.qs2"))
+SUs_Ag <- qs_read(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs2"))
+SA1s <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs2"))
 KMRs <- names(SUs_Ag)
 
 ### Adjust inla.setOption(num.threads= "8:1") to allocate the number of threads to be used in 1 inla run. The number need to be reduce if running parallel.
@@ -607,13 +623,13 @@ toc(log = TRUE)
 
 ## Forestry----
 ## Load data
-ZStats_Woody_Fo <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs"))
+ZStats_Woody_Fo <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs2"))
 nrow(ZStats_Woody_Fo %>% bind_rows())
-ZStats_Covs_Fo <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_Fo.qs"))
+ZStats_Covs_Fo <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Covs_Fo.qs2"))
 nrow(ZStats_Covs_Fo %>% bind_rows())
-SUs_Fo <- qread(file.path(OUTPUT_DIR, "spatial_units/sus_Fo.qs"))
+SUs_Fo <- qs_read(file.path(OUTPUT_DIR, "spatial_units/SUs_Fo.qs2"))
 nrow(SUs_Fo %>% bind_rows())
-SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
+SA1s <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs2"))
 nrow(SA1s %>% bind_rows())
 KMRs <- names(SUs_Fo)
 
@@ -642,13 +658,13 @@ toc(log = TRUE)
 
 ## Infrastructure----
 ## Load data
-ZStats_Woody_In <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs"))
+ZStats_Woody_In <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs2"))
 nrow(ZStats_Woody_In %>% bind_rows())
-ZStats_Covs_In <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_In.qs"))
+ZStats_Covs_In <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Covs_In.qs2"))
 nrow(ZStats_Covs_In %>% bind_rows())
-SUs_In <- qread(file.path(OUTPUT_DIR, "spatial_units/sus_In.qs"))
+SUs_In <- qs_read(file.path(OUTPUT_DIR, "spatial_units/SUs_In.qs2"))
 nrow(SUs_In %>% bind_rows())
-SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
+SA1s <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs2"))
 nrow(SA1s %>% bind_rows())
 KMRs <- names(SUs_In)
 
@@ -690,7 +706,6 @@ Select_model2(KMR = kmr, ClearType = 2, SpatUnits = SUs_In,
                Initial_Tlimit = 1000, OutputDir = file.path(OUTPUT_DIR, "models/"))
 toc(log = TRUE)
 
-1e-13
 
 #### Backward model selection
 tic("Select_model: In backward selection")
@@ -704,15 +719,15 @@ toc(log = TRUE)
 
 ## Check model selection step ---- 
 ### Check errors in Model selections steps ---
-SUs_Ag <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"))
+SUs_Ag <- qs_read(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs2"))
 KMRs <- names(SUs_Ag)
 rm(SUs_Ag)
 ClrTyps <- c("Ag", "Fo", "In")
 
 for(ClrTyp in ClrTyps){
   for(kmr in KMRs){
-    SelModel_FC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_" , ClrTyp,"_FC.qs")))
-    SelModel_BC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_" , ClrTyp,"_FC.qs")))
+    SelModel_FC <- qs_read(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_" , ClrTyp,"_FC.qs2")))
+    SelModel_BC <- qs_read(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_" , ClrTyp,"_BC.qs2")))
     if(length(SelModel_FC$ERROR_ls) == 0){
       cat(ClrTyp, kmr, " Forward selection: NO ERROR! :-)", "\n")
     }else if(length(SelModel_FC$ERROR_ls) > 0){
@@ -730,7 +745,7 @@ for(ClrTyp in ClrTyps){
 
 ### Compare DIC values for Forward complete and backward complete model selection ----
 ## Also verify the minimum DIC values recorded in the model selection steps (WHILE LOOP) and the final selected model  
-SUs_Ag <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"))
+SUs_Ag <- qs_read(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs2"))
 KMRs <- names(SUs_Ag)
 rm(SUs_Ag)
 ClrTyps <- c("Ag", "Fo", "In")
@@ -739,8 +754,8 @@ for(ClrTyp in ClrTyps){  ## Agriculture, Forestry, Infrastructure
   for(kmr in KMRs){  ## KMRs
     
     # read model selection results for both forward and backward selection
-    SelModel_BC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_" , ClrTyp , "_BC.qs")))
-    SelModel_FC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_" , ClrTyp , "_FC.qs")))
+    SelModel_BC <- qs_read(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_" , ClrTyp , "_BC.qs2")))
+    SelModel_FC <- qs_read(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_" , ClrTyp , "_FC.qs2")))
     
     # Find minimum DIC values recorded in the model selection steps (WHILE LOOP)
     MinDIC_BC <- SelModel_BC$DIC_ls[which.min(unlist(SelModel_BC$DIC_ls))]
@@ -798,10 +813,10 @@ for(ClrTyp in ClrTyps){  ## Agriculture, Forestry, Infrastructure
 ## Export model selection results and coefficient estimates ----
 
 ### Agriculture ----
-SUs_Ag <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs"))
-SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
-ZStats_Woody_Ag <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs"))
-ZStats_Covs_Ag <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_Ag.qs"))
+SUs_Ag <- qs_read(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs2"))
+SA1s <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs2"))
+ZStats_Woody_Ag <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Woody_Ag.qs2"))
+ZStats_Covs_Ag <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Covs_Ag.qs2"))
 KMRs <- names(ZStats_Covs_Ag)
 kmr <- KMRs[1]
 Model_Ag <- fit_model(KMR = kmr, ClearType = 1, SpatUnits = SUs_Ag, RespData = ZStats_Woody_Ag, CovsCD = ZStats_Covs_Ag, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
@@ -810,8 +825,8 @@ Cov_ls_Ag <- summary(Model_Ag$PModel)$fixed %>% as.data.frame() %>% rownames_to_
 for (kmr in KMRs){
   
   # read model selection results for both forward and backward selection
-  SelModel_BC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_Ag_BC.qs")))
-  SelModel_FC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_Ag_FC.qs")))
+  SelModel_BC <- qs_read(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_Ag_BC.qs2")))
+  SelModel_FC <- qs_read(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_Ag_FC.qs2")))
   
   # Find minimum DIC values recorded in the model selection steps (WHILE LOOP)
   MinDIC_BC <- SelModel_BC$DIC_ls[which.min(unlist(SelModel_BC$DIC_ls))]
@@ -855,11 +870,11 @@ for (kmr in KMRs){
 # write.csv(Cov_ls_Ag_tab, file.path(OUTPUT_DIR, "models/Cov_ls_Ag.csv"), row.names = FALSE, na = "")
 
 ### Forestry ----
-SUs_Fo <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_Fo.qs"))
+SUs_Fo <- qs_read(file.path(OUTPUT_DIR, "spatial_units/SUs_Fo.qs2"))
 nrow(SUs_Fo %>% bind_rows())
-SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
-ZStats_Woody_Fo <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs"))
-ZStats_Covs_Fo <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_Fo.qs"))
+SA1s <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs2"))
+ZStats_Woody_Fo <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Woody_Fo.qs2"))
+ZStats_Covs_Fo <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Covs_Fo.qs2"))
 KMRs <- names(ZStats_Covs_Fo)
 kmr <- KMRs[1]
 Model_Fo <- fit_model(KMR = kmr, ClearType = 3, SpatUnits = SUs_Fo, RespData = ZStats_Woody_Fo, CovsCD = ZStats_Covs_Fo, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, Initial_Tlimit = 1000, OutputDir = NULL)
@@ -868,8 +883,8 @@ Cov_ls_Fo <- summary(Model_Fo$PModel)$fixed %>% as.data.frame() %>% rownames_to_
 for (kmr in KMRs){
   
   # read model selection results for both forward and backward selection
-  SelModel_BC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_Fo_BC.qs")))
-  SelModel_FC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_Fo_FC.qs")))
+  SelModel_BC <- qs_read(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_Fo_BC.qs2")))
+  SelModel_FC <- qs_read(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_Fo_FC.qs2")))
   
   # Find minimum DIC values recorded in the model selection steps (WHILE LOOP)
   MinDIC_BC <- SelModel_BC$DIC_ls[which.min(unlist(SelModel_BC$DIC_ls))]
@@ -912,10 +927,10 @@ for (kmr in KMRs){
 # write.csv(Cov_ls_tab, file.path(OUTPUT_DIR, "models/Cov_ls_Fo.csv"), row.names = FALSE, na = "")
 
 ### Infrastructure ----
-SUs_In <- qread(file.path(OUTPUT_DIR, "spatial_units/SUs_In.qs"))
-SA1s <- qread(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs"))
-ZStats_Woody_In <- qread(file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs"))
-ZStats_Covs_In <- qread(file.path(OUTPUT_DIR, "data/ZStats_Covs_In.qs"))
+SUs_In <- qs_read(file.path(OUTPUT_DIR, "spatial_units/SUs_In.qs2"))
+SA1s <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sa1s.qs2"))
+ZStats_Woody_In <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Woody_In.qs2"))
+ZStats_Covs_In <- qs_read(file.path(OUTPUT_DIR, "data/ZStats_Covs_In.qs2"))
 KMRs <- names(ZStats_Covs_In)
 kmr <- KMRs[9]
 Model_In <- fit_model(KMR = kmr, ClearType = 2, SpatUnits = SUs_In, RespData = ZStats_Woody_In, CovsCD = ZStats_Covs_In, SA1sPoly = SA1s, Explanatory = "All", Verbose = FALSE, N_retry=3, N_rerun = 0, NMod_TOLN = 1e-11, Initial_Tlimit = 1000, OutputDir = NULL)
@@ -924,8 +939,8 @@ Cov_ls_In <- summary(Model_In$PModel)$fixed %>% as.data.frame() %>% rownames_to_
 for (kmr in KMRs){
   
   # read model selection results for both forward and backward selection
-  SelModel_BC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_In_BC.qs")))
-  SelModel_FC <- qread(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_In_FC.qs")))
+  SelModel_BC <- qs_read(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_In_BC.qs2")))
+  SelModel_FC <- qs_read(file.path(OUTPUT_DIR, paste0("models/SelModel_", kmr, "_In_FC.qs2")))
   
   # Find minimum DIC values recorded in the model selection steps (WHILE LOOP)
   MinDIC_BC <- SelModel_BC$DIC_ls[which.min(unlist(SelModel_BC$DIC_ls))]
@@ -966,11 +981,10 @@ for (kmr in KMRs){
 
 # write.csv(Cov_ls_tab, file.path(OUTPUT_DIR, "models/Cov_ls_In.csv"), row.names = FALSE, na = "")
 
-# MODEL PREDICTIONS ----
 ## Refit the best model ----
 ### Identify model with lower DIC (Between FC & BC)
 ### Refit the model to save internal GMRF approximations for inla.posterior.sample(): control.compute = (list(config = TRUE))
-SUs_Ag <- qread(file.path(OUTPUT_DIR, "spatial_units/sus_Ag.qs"))
+SUs_Ag <- qs_read(file.path(OUTPUT_DIR, "spatial_units/sus_Ag.qs2"))
 KMRs <- names(SUs_Ag)
 ClrTyps <- c("Ag", "In", "Fo")
 ClearTypes <- c(1, 2, 3)
@@ -989,10 +1003,49 @@ ClrTyp <- "In"
 
 refit_model(KMR = kmr, ClearType = ClearType, N_rerun = 4, NMod_TOLN = 1e-13, ModelDir = file.path(OUTPUT_DIR, "models/"))
 
+# Result outputs ----
+## Extract long format dataframe of covariate selection results
+Cov_ls_Ag_long <- Get_cov_coeff_long(ClearType = 1, OUTPUT_DIR = OUTPUT_DIR)
+Cov_ls_In_long <- Get_cov_coeff_long(ClearType = 2, OUTPUT_DIR = OUTPUT_DIR)
+Cov_ls_Fo_long <- Get_cov_coeff_long(ClearType = 3, OUTPUT_DIR = OUTPUT_DIR)
+
+
+# Combine results from all clearing types ----
+Cov_df <- full_join(Cov_ls_Ag_long, Cov_ls_Fo_long, by = c("Covariate", "kmr")) %>%
+  full_join(Cov_ls_In_long, by = c("Covariate", "kmr")) %>%
+  filter(!Covariate == "LandUse5") %>%
+  dplyr::select(Covariate, kmr, Cof_PModel_Ag, Cof_NModel_Ag, Cof_PModel_Fo, Cof_NModel_Fo, Cof_PModel_In, Cof_NModel_In) %>%
+  arrange(kmr, Covariate)
+
+qsave(Cov_df, file.path(OUTPUT_DIR, "data/Cov_df.qs"))
+
+## Extract covariate coefficient and credible intervals
+Cov_CI_Ag <- Get_cov_coeff_CI(ClearType = 1, OUTPUT_DIR = OUTPUT_DIR)
+Cov_CI_In <- Get_cov_coeff_CI(ClearType = 2, OUTPUT_DIR = OUTPUT_DIR)
+Cov_CI_Fo <- Get_cov_coeff_CI(ClearType = 3, OUTPUT_DIR = OUTPUT_DIR)
+
+## Extract random effects coefficient and credible intervals
+Rand_CI_Ag <- Get_rand_coeff_CI(ClearType = 1, OUTPUT_DIR = OUTPUT_DIR)
+Rand_CI_In <- Get_rand_coeff_CI(ClearType = 2, OUTPUT_DIR = OUTPUT_DIR)
+Rand_CI_Fo <- Get_rand_coeff_CI(ClearType = 3, OUTPUT_DIR = OUTPUT_DIR)
+
+qs_save(Rand_CI_Ag, file.path(OUTPUT_DIR, "data/Rand_CI_Ag.qs2"))
+qs_save(Rand_CI_In, file.path(OUTPUT_DIR, "data/Rand_CI_In.qs2"))
+qs_save(Rand_CI_Fo, file.path(OUTPUT_DIR, "data/Rand_CI_Fo.qs2"))
+
+
+## Extract beta distribution precision 
+
+Cov_CI <- bind_rows(Cov_CI_Ag %>% mutate(ClearType = "Agriculture"),
+                    Cov_CI_Fo %>% mutate(ClearType = "Forestry"),
+                    Cov_CI_In %>% mutate(ClearType = "Infrastructure"))
+
+qs_save(Cov_CI, file.path(OUTPUT_DIR, "data/Cov_CI.qs"))
+
 ## Check MLIK integration and Gaussian approximation for the refitted model
 walk(ClrTyps, function(ClrTyp){
   walk(KMRs, function(kmr){
-    MODEL <- qread(file.path(OUTPUT_DIR, paste0("models/Model_", kmr, "_", ClrTyp, ".qs")))
+    MODEL <- qs_read(file.path(OUTPUT_DIR, paste0("models/Model_", kmr, "_", ClrTyp, ".qs2")))
     dMLIK_PModel <- abs(MODEL$PModel$mlik[1,1] - MODEL$PModel$mlik[2,1])
     dMLIK_NModel <- abs(MODEL$NModel$mlik[1,1] - MODEL$NModel$mlik[2,1])
     cat("Model: ", kmr, " ClearType: ", ClrTyp, "\n")
@@ -1006,7 +1059,7 @@ walk(ClrTyps, function(ClrTyp){
 ## Export csv dMLIK values----
 dMLIK_ClrTyps <- map(ClrTyps, function(ClrTyp){
    dMLIK_KMR<- map(KMRs, function(kmr_val){
-    MODEL <- qread(file.path(OUTPUT_DIR, paste0("models/Model_", kmr_val, "_", ClrTyp, ".qs")))
+    MODEL <- qs_read(file.path(OUTPUT_DIR, paste0("models/Model_", kmr_val, "_", ClrTyp, ".qs2")))
     dMLIK_PModel <- abs(MODEL$PModel$mlik[1,1] - MODEL$PModel$mlik[2,1])
     dMLIK_NModel <- abs(MODEL$NModel$mlik[1,1] - MODEL$NModel$mlik[2,1])
     return(data.frame(KMR = kmr_val, ClearType = ClrTyp, dMLIK_PModel = dMLIK_PModel, dMLIK_NModel = dMLIK_NModel))
@@ -1017,6 +1070,7 @@ row.names(dMLIK_ClrTyps_BD) <- NULL
 write.csv(dMLIK_ClrTyps_BD, file = file.path(OUTPUT_DIR, "models/dMLIK.csv"), row.names = FALSE, na = "")
 
 
+
 # Prediction by sampling ----
 
 ### Posterior sample generated by high-performance computing platform (‘Bunya’ AMD epyc3 Milan compute cores with memory 28GB to 1.5TB) administrated by The University of Queensland Research Computing Centre (2024).
@@ -1025,21 +1079,21 @@ write.csv(dMLIK_ClrTyps_BD, file = file.path(OUTPUT_DIR, "models/dMLIK.csv"), ro
 
 ## Example prediction by sampling from the posterior distribution ----
 # Load directory
-MODEL <- qread(file.path(OUTPUT_DIR, "models/Model_CC_Ag.qs"))
+MODEL <- qs_read(file.path(OUTPUT_DIR, "models/Model_CC_Ag.qs2"))
 CT <- if(MODEL$ClearType == "1"){"Ag"} else if(MODEL$ClearType == "2"){"In"} else if(MODEL$ClearType == "3"){"Fo"}
 N <- 20 # Number of samples
 cat("\n\nRun prediction by sampling " , N , "times for\nKMR: ",  MODEL$KMR, "\nClear Type: ", CT, "\n\n")
 
 # Predictions
 Pred <- predict_model3(model = MODEL, N = N, RandEff = "SA1ID")
-qread(file.path(OUTPUT_DIR, "spatial_units/sus_Ag.qs")) %>% map(nrow)
-qread(file.path(OUTPUT_DIR, "spatial_units/sus_In.qs")) %>% map(nrow)
-qread(file.path(OUTPUT_DIR, "spatial_units/sus_Fo.qs")) %>% map(nrow)
+qs_read(file.path(OUTPUT_DIR, "spatial_units/sus_Ag.qs2")) %>% map(nrow)
+qs_read(file.path(OUTPUT_DIR, "spatial_units/sus_In.qs2")) %>% map(nrow)
+qs_read(file.path(OUTPUT_DIR, "spatial_units/sus_Fo.qs2")) %>% map(nrow)
 
 # Save Predictions
-output_name <- file.path(file.path(OUTPUT_DIR, "predictions/Pred_CC_Ag.qs"))
+output_name <- file.path(file.path(OUTPUT_DIR, "predictions/Pred_CC_Ag.qs2"))
 cat("\n\nSave Predictions to: ", output_name, "\n")
-qsave(Pred, output_name)
+qs_save(Pred, output_name)
 
 # Generate vector output----
 ## Check if geodatabase already exists, if not create one
@@ -1053,13 +1107,27 @@ walk(1:3, ~Combine_Predictions(ClearType = .x, Prediction_DIR = file.path(OUTPUT
 
 # Extract Beta distribution precision (Phi) for each KMR ----
 KMRs <- c("CC", "CST", "DRP", "FW", "NC", "NT", "NS", "R", "SC")
-NModel_Phi <- map(KMRs, ~qread(
-  file.path(OUTPUT_DIR, "predictions", paste0("Pred_", .x, "_In.qs")))$NModel_Phi
-  )
-NModel_Phi <- unlist(NModel_Phi) 
-names(NModel_Phi) <- KMRs
 
-qsave(NModel_Phi, file = file.path(OUTPUT_DIR, "predictions/NModel_Phi_In.qs"))
+NModel_Phi_Ag <- map(KMRs, ~qs_read(
+  file.path(OUTPUT_DIR, "predictions", paste0("Pred_", .x, "_Ag.qs2")))$NModel_Phi
+  )
+NModel_Phi_Ag <- unlist(NModel_Phi_Ag)
+names(NModel_Phi_Ag) <- KMRs
+qs_save(NModel_Phi_Ag, file = file.path(OUTPUT_DIR, "predictions", "NModel_Phi_Ag.qs2"))
+
+NModel_Phi_Fo <- map(KMRs, ~qs_read(
+  file.path(OUTPUT_DIR, "predictions", paste0("Pred_", .x, "_Fo.qs2")))$NModel_Phi
+  )
+NModel_Phi_Fo <- unlist(NModel_Phi_Fo)
+names(NModel_Phi_Fo) <- KMRs
+qs_save(NModel_Phi_Fo, file = file.path(OUTPUT_DIR, "predictions", "NModel_Phi_Fo.qs2"))
+
+NModel_Phi_In <- map(KMRs, ~qs_read(
+  file.path(OUTPUT_DIR, "predictions", paste0("Pred_", .x, "_In.qs2")))$NModel_Phi
+  )
+NModel_Phi_In <- unlist(NModel_Phi_In)
+names(NModel_Phi_In) <- KMRs
+qs_save(NModel_Phi_In, file = file.path(OUTPUT_DIR, "predictions", "NModel_Phi_In.qs2"))
 
 # Koala habitat loss risk ----
 gdb_path <- file.path(OUTPUT_DIR, "predictions/Predictions.gdb")
@@ -1112,9 +1180,11 @@ qsave(Khab_risk_Fo, file = file.path(OUTPUT_DIR, "predictions/Khab_risk_Fo.qs"),
 
 # Combining all Predictions and Koala habitat loss risk ----
 ## Load prediction data
-Pred_Ag <- qread(file.path(OUTPUT_DIR, "predictions/Pred_Ag.qs"))
-Pred_In <- qread(file.path(OUTPUT_DIR, "predictions/Pred_In.qs"))
-Pred_Fo <- qread(file.path(OUTPUT_DIR, "predictions/Pred_Fo.qs"))
+Pred_Ag <- qs_read(file.path(OUTPUT_DIR, "predictions/Pred_Ag.qs2"))
+Pred_In <- qs_read(file.path(OUTPUT_DIR, "predictions/Pred_In.qs2"))
+Pred_Fo <- qs_read(file.path(OUTPUT_DIR, "predictions/Pred_Fo.qs2"))
+
+
 
 ## Load Koala habitat loss risk data
 Khab_risk_Ag <- qread(file.path(OUTPUT_DIR, "predictions/Khab_risk_Ag.qs"))
@@ -1197,3 +1267,7 @@ gpkg_path <- file.path(OUTPUT_DIR, "predictions/SUs_Predictions.gpkg")
 # dir.exists(dirname(gpkg_path))
 
 st_write(SUs_Pred_SF, dsn = gpkg_path, layer = "SUs_Predictions", append = FALSE)
+
+SUs_Pred_SF <- st_read(dsn = gpkg_path, layer = "SUs_Predictions")
+
+
