@@ -30,7 +30,7 @@ CT <- if(MODEL$ClearType == "1"){"Ag"} else if(MODEL$ClearType == "2"){"In"} els
 cat("\\n\\nRun prediction by sampling 50000 times for\\nKMR: ",  MODEL$KMR, "\\nClear Type: ", CT, "\\n\\n")
 
 # Predictions
-Pred <- predict_model3(model = MODEL, N = 50000, RandEff = "SA1ID")
+Pred <- predict_model(model = MODEL, N = 50000, RandEff = "SA1ID")
 
 # Save Predictions
 output_name <- file.path(PRED_DIR , paste0("Pred" , str_extract(basename(MODEL_FPATH), "_.*")))
