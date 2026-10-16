@@ -8,15 +8,15 @@ library(sp)
 library(terra)
 library(tidyverse)
 library(spdep)
-if (!require("INLA")) install.packages("INLA",repos=c(getOption("repos"),INLA="https://inla.r-inla-download.org/R/stable"), dep=TRUE)
-library(INLA) #INLA version 24.06.27
+# if (!require("INLA")) install.packages("INLA",repos=c(getOption("repos"),INLA="https://inla.r-inla-download.org/R/stable"), dep=TRUE)
+library(INLA) 
 library(GGally)
 library(ggpubr)
 library(confintr)
 library(readxl)
 library(tictoc)
-if(!require("qs")) install.packages("qs")
-library(qs) # this is deprecited and most data files should have been progressively replaced with qs2 files for compatibility with the latest version of the package.
+# if(!require("qs")) install.packages("qs")
+# library(qs) # this is deprecited and all data files have been replaced with qs2 files for compatibility with the latest version of the package.
 library(qs2)
 library(furrr)
 library(ltm)
@@ -71,6 +71,22 @@ for (i in 1:length(names(ZStats_CovsC))) {
 names(ZStats_Covs) <- names(ZStats_CovsC)
 if(file.exists(file.path(OUTPUT_DIR, "data/ZStats_Covs.qs"))){file.remove(file.path(OUTPUT_DIR, "data/ZStats_Covs.qs"))} # replacing all qs with qs2 for compatibility
 qs_save(ZStats_Covs, file = file.path(OUTPUT_DIR, "data/ZStats_Covs.qs2"))
+
+# Check woody amount correlations
+for (i in names(ZStats_Woody)) {
+  corr <- cor(ZStats_Woody[[i]]$sum.woody, ZStats_CovsC[[i]]$EcolCond, use = "complete.obs")
+  print(paste0("Correlation between woody amount and ecological condition in ", i, ": ", round(corr, 3)))
+}
+
+for (i in names(ZStats_Woody)) {
+  corr <- cor(ZStats_Woody[[i]]$sum.woody, ZStats_CovsC[[i]]$Area, use = "complete.obs")
+  print(paste0("Correlation between woody amount and area in ", i, ": ", round(corr, 3)))
+}
+
+for (i in names(ZStats_Woody)) {
+  corr <- cor(ZStats_Woody[[i]]$sum.woody, ZStats_Woody[[i]]$sum.aloss + ZStats_Woody[[i]]$sum.iloss + ZStats_Woody[[i]]$sum.floss, use = "complete.obs")
+  print(paste0("Correlation between woody amount and total loss in ", i, ": ", round(corr, 3)))
+}
 
 
 # CHECKING FOR MULTI-COLLINEARITY ----
@@ -749,7 +765,6 @@ SUs_Ag <- qs_read(file.path(OUTPUT_DIR, "spatial_units/SUs_Ag.qs2"))
 KMRs <- names(SUs_Ag)
 rm(SUs_Ag)
 ClrTyps <- c("Ag", "Fo", "In")
-
 for(ClrTyp in ClrTyps){  ## Agriculture, Forestry, Infrastructure
   for(kmr in KMRs){  ## KMRs
     
@@ -1017,7 +1032,7 @@ Cov_df <- full_join(Cov_ls_Ag_long, Cov_ls_Fo_long, by = c("Covariate", "kmr")) 
   dplyr::select(Covariate, kmr, Cof_PModel_Ag, Cof_NModel_Ag, Cof_PModel_Fo, Cof_NModel_Fo, Cof_PModel_In, Cof_NModel_In) %>%
   arrange(kmr, Covariate)
 
-qsave(Cov_df, file.path(OUTPUT_DIR, "data/Cov_df.qs"))
+qs_save(Cov_df, file.path(OUTPUT_DIR, "data/Cov_df.qs2"))
 
 ## Extract covariate coefficient and credible intervals
 Cov_CI_Ag <- Get_cov_coeff_CI(ClearType = 1, OUTPUT_DIR = OUTPUT_DIR)
@@ -1040,7 +1055,7 @@ Cov_CI <- bind_rows(Cov_CI_Ag %>% mutate(ClearType = "Agriculture"),
                     Cov_CI_Fo %>% mutate(ClearType = "Forestry"),
                     Cov_CI_In %>% mutate(ClearType = "Infrastructure"))
 
-qs_save(Cov_CI, file.path(OUTPUT_DIR, "data/Cov_CI.qs"))
+qs_save(Cov_CI, file.path(OUTPUT_DIR, "data/Cov_CI.qs2"))
 
 ## Check MLIK integration and Gaussian approximation for the refitted model
 walk(ClrTyps, function(ClrTyp){
@@ -1069,8 +1084,46 @@ dMLIK_ClrTyps_BD <- bind_rows(dMLIK_ClrTyps)
 row.names(dMLIK_ClrTyps_BD) <- NULL
 write.csv(dMLIK_ClrTyps_BD, file = file.path(OUTPUT_DIR, "models/dMLIK.csv"), row.names = FALSE, na = "")
 
+# Extract CPO and PIT values for the refitted model ----
 
-
+MODEL <- qs_read(file.path(OUTPUT_DIR, paste0("models/Model_", kmr_val, "_", ClrTyp, ".qs2")))
+Resp <- MODEL$RespData[[kmr_val]][[if(ClrTyp == "Ag"){"sum.aloss"} else if(ClrTyp == "Fo"){"sum.floss"} else if(ClrTyp == "In"){"sum.iloss"}]]
+CPO_PModel <- MODEL$PModel$cpo$cpo[which(MODEL$PModel$cpo$failure==0)]
+CPO_NModel <- MODEL$NModel$cpo$cpo[which(MODEL$NModel$cpo$failure==0)]
+MNLCPO_PModel <- mean(-log(CPO_PModel))
+MNLCPO_NModel <- mean(-log(CPO_NModel))
+PIT_NModel <- MODEL$NModel$cpo$pit[which(MODEL$NModel$cpo$failure==0)]
+#are Central Coast (CC), Central and Southern Tablelands (CST), Darling Riverine Plains (DRP), Far West (FW), North Coast (NC), Northwest Slopes (NS), Northern Tablelands (NT), Riverina (R) and South Coast (SC
+KMR_LU <- c("CC" = "Central Coast", 
+            "CST" = "Central and Southern Tablelands",
+            "DRP" = "Darling Riverine Plains",
+            "FW" = "Far West",
+            "NC" = "North Coast",
+            "NS" = "Northwest Slopes",
+            "NT" = "Northern Tablelands",
+            "R" = "Riverina",
+            "SC" = "South Coast")
+PIT <- list()
+MNLCPO_DF <- matrix(NA, nrow = 0, ncol = 4) %>% as.data.frame() %>% setNames(c("KMR", "ClearType", "MNLCPO_PModel", "MNLCPO_NModel"))
+for(ClrTyp in ClrTyps){
+  for(kmr_val in KMRs){
+    ClearType_long <- if(ClrTyp == "Ag"){"Agriculture"} else if(ClrTyp == "Fo"){"Forestry"} else if(ClrTyp == "In"){"Infrastructure"}
+    KMR_long <- KMR_LU[kmr_val]
+    cat("Extract CPO and PIT for KMR: ", kmr_val, " (", KMR_long, ") and ClearType: ", ClrTyp, " (", ClearType_long, ")\n")
+    MODEL <- qs_read(file.path(OUTPUT_DIR, paste0("models/Model_", kmr_val, "_", ClrTyp, ".qs2")))
+    CPO_PModel <- MODEL$PModel$cpo$cpo[which(MODEL$PModel$cpo$failure==0)]
+    CPO_NModel <- MODEL$NModel$cpo$cpo[which(MODEL$NModel$cpo$failure==0)]
+    MNLCPO_PModel <- mean(-log(CPO_PModel))
+    MNLCPO_NModel <- mean(-log(CPO_NModel))
+    PIT_NModel <- MODEL$NModel$cpo$pit[which(MODEL$NModel$cpo$failure==0)]
+    PIT[[paste0(kmr_val, "_", ClrTyp)]] <- PIT_NModel
+    MNLCPO_DF <- rbind(MNLCPO_DF, data.frame(KMR = KMR_long, ClearType = ClearType_long, MNLCPO_PModel = MNLCPO_PModel, MNLCPO_NModel = MNLCPO_NModel))
+  }
+}
+row.names(MNLCPO_DF) <- NULL
+write_csv(MNLCPO_DF, file = file.path(OUTPUT_DIR, "data/MNLCPO_DF.csv"))
+qs_save(PIT, file = file.path(OUTPUT_DIR, "data/PIT.qs2"))
+MNLCPO_DF <- read_csv(file = file.path(OUTPUT_DIR, "data/MNLCPO_DF.csv"))
 # Prediction by sampling ----
 
 ### Posterior sample generated by high-performance computing platform (‘Bunya’ AMD epyc3 Milan compute cores with memory 28GB to 1.5TB) administrated by The University of Queensland Research Computing Centre (2024).
@@ -1085,7 +1138,7 @@ N <- 20 # Number of samples
 cat("\n\nRun prediction by sampling " , N , "times for\nKMR: ",  MODEL$KMR, "\nClear Type: ", CT, "\n\n")
 
 # Predictions
-Pred <- predict_model3(model = MODEL, N = N, RandEff = "SA1ID")
+Pred <- predict_model(model = MODEL, N = N, RandEff = "SA1ID")
 qs_read(file.path(OUTPUT_DIR, "spatial_units/sus_Ag.qs2")) %>% map(nrow)
 qs_read(file.path(OUTPUT_DIR, "spatial_units/sus_In.qs2")) %>% map(nrow)
 qs_read(file.path(OUTPUT_DIR, "spatial_units/sus_Fo.qs2")) %>% map(nrow)
@@ -1271,3 +1324,111 @@ st_write(SUs_Pred_SF, dsn = gpkg_path, layer = "SUs_Predictions", append = FALSE
 SUs_Pred_SF <- st_read(dsn = gpkg_path, layer = "SUs_Predictions")
 
 
+
+
+##############################################
+# Calculation of mean log-linear effects of covariates for each KMR and clearing type
+KMRs <- c("CC", "CST", "DRP", "FW", "NC", "NS", "NT", "R", "SC")
+Pred_Ag <- qs_read(file.path(OUTPUT_DIR, "predictions/Pred_Ag.qs2"))
+Pred_In <- qs_read(file.path(OUTPUT_DIR, "predictions/Pred_In.qs2"))
+Pred_Fo <- qs_read(file.path(OUTPUT_DIR, "predictions/Pred_Fo.qs2"))
+
+
+Pred_Ag_DF <- st_drop_geometry(Pred_Ag) %>% 
+  dplyr::select(KMR, SUID, PredP, PredN)
+KMR_LONG <- unique(Pred_Ag_DF$KMR)
+
+KMRs_LU <- setNames(KMR_LONG, c("CC", "CST", "DRP", "FW", "NC", "NS", "NT", "R", "SC"))
+
+CovCoef_Ag <- map(KMRs, function(kmr){
+  MODEL <- qs_read(file.path(OUTPUT_DIR, paste0("models/Model_", kmr, "_Ag.qs2")))
+  PMod_CovCoef  <- as.data.frame(MODEL$PModel$summary.fixed) %>% 
+    rownames_to_column("Covariate") %>% 
+    dplyr::select(Covariate, mean) %>% 
+    filter(Covariate != "(Intercept)") %>%
+    mutate(KMR = kmr, ClearType = "Ag", Model = "PModel") %>% 
+    rename(CovCoef = mean)
+  NMod_CovCoef  <- as.data.frame(MODEL$NModel$summary.fixed) %>%
+    rownames_to_column("Covariate") %>% 
+    dplyr::select(Covariate, mean) %>% 
+    filter(Covariate != "(Intercept)") %>%
+    mutate(KMR = kmr, ClearType = "Ag", Model = "NModel") %>% 
+    rename(CovCoef = mean)
+  return(bind_rows(PMod_CovCoef, NMod_CovCoef))
+}) %>% bind_rows() %>% 
+  mutate(KMR = recode(KMR, !!!KMRs_LU)) %>% 
+  pivot_wider(names_from = Model, values_from = CovCoef)
+CovCoef_Ag %>% arrange(PModel)
+Pred_Ag_LogLinEff <- left_join(Pred_Ag_DF, CovCoef_Ag, by = c("KMR" = "KMR")) %>% 
+  mutate(LogLinComb = (PModel * (1 - PredP)) + (NModel * (1 - PredN))) %>% 
+  group_by(KMR, Covariate, ClearType) %>% 
+  summarise(mean_LogLinComb = mean(LogLinComb, na.rm = TRUE), .groups = "drop_last") %>%
+  ungroup()
+
+Pred_In_DF <- st_drop_geometry(Pred_In) %>% 
+  dplyr::select(KMR, SUID, PredP, PredN)
+
+CovCoef_In <- map(KMRs, function(kmr){
+  MODEL <- qs_read(file.path(OUTPUT_DIR, paste0("models/Model_", kmr, "_In.qs2")))
+  PMod_CovCoef  <- as.data.frame(MODEL$PModel$summary.fixed) %>% 
+    rownames_to_column("Covariate") %>% 
+    dplyr::select(Covariate, mean) %>% 
+    filter(Covariate != "(Intercept)") %>%
+    mutate(KMR = kmr, ClearType = "In", Model = "PModel") %>% 
+    rename(CovCoef = mean)
+  NMod_CovCoef  <- as.data.frame(MODEL$NModel$summary.fixed) %>%
+    rownames_to_column("Covariate") %>%
+    dplyr::select(Covariate, mean) %>%
+    filter(Covariate != "(Intercept)") %>%
+    mutate(KMR = kmr, ClearType = "In", Model = "NModel") %>% 
+    rename(CovCoef = mean)
+  return(bind_rows(PMod_CovCoef, NMod_CovCoef))
+}) %>% bind_rows() %>%
+  mutate(KMR = recode(KMR, !!!KMRs_LU)) %>% 
+  pivot_wider(names_from = Model, values_from = CovCoef)
+
+Pred_In_LogLinEff <- left_join(Pred_In_DF, CovCoef_In, by = c("KMR" = "KMR")) %>% 
+  mutate(LogLinComb = (PModel * (1 - PredP)) + (NModel * (1 - PredN))) %>% 
+  group_by(KMR, Covariate, ClearType) %>% 
+  summarise(mean_LogLinComb = mean(LogLinComb, na.rm = TRUE), .groups = "drop_last") %>%
+  ungroup()
+
+Pred_Fo_DF <- st_drop_geometry(Pred_Fo) %>% 
+  dplyr::select(KMR, SUID, PredP, PredN)
+
+CovCoef_Fo <- map(KMRs, function(kmr){
+  MODEL <- qs_read(file.path(OUTPUT_DIR, paste0("models/Model_", kmr, "_Fo.qs2")))
+  PMod_CovCoef  <- as.data.frame(MODEL$PModel$summary.fixed) %>% 
+    rownames_to_column("Covariate") %>% 
+    dplyr::select(Covariate, mean) %>% 
+    filter(Covariate != "(Intercept)") %>%
+    mutate(KMR = kmr, ClearType = "Fo", Model = "PModel") %>% 
+    rename(CovCoef = mean)
+  NMod_CovCoef  <- as.data.frame(MODEL$NModel$summary.fixed) %>%
+    rownames_to_column("Covariate") %>%
+    dplyr::select(Covariate, mean) %>%
+    filter(Covariate != "(Intercept)") %>%
+    mutate(KMR = kmr, ClearType = "Fo", Model = "NModel") %>%
+    rename(CovCoef = mean)
+  return(bind_rows(PMod_CovCoef, NMod_CovCoef))
+}) %>% bind_rows() %>%
+  mutate(KMR = recode(KMR, !!!KMRs_LU)) %>% 
+  pivot_wider(names_from = Model, values_from = CovCoef)
+
+Pred_Fo_LogLinEff <- left_join(Pred_Fo_DF, CovCoef_Fo, by = c("KMR" = "KMR")) %>% 
+  mutate(LogLinComb = (PModel * (1 - PredP)) + (NModel * (1 - PredN))) %>% 
+  group_by(KMR, Covariate, ClearType) %>% 
+  summarise(mean_LogLinComb = mean(LogLinComb, na.rm = TRUE), .groups = "drop_last") %>%
+  ungroup()
+
+LogLinEff_ALL <- bind_rows(Pred_Ag_LogLinEff, Pred_In_LogLinEff, Pred_Fo_LogLinEff)
+unique(LogLinEff_ALL$Covariate)
+qs_save(LogLinEff_ALL, file.path(OUTPUT_DIR, "data/LogLinEff_ALL.qs2"))
+
+
+summary(MODEL$PModel)$fixed %>% as.data.frame() %>% rownames_to_column("Covariate") %>% 
+      dplyr::select(Covariate, mean, sd, LowerCI = `0.025quant`, UpperCI = `0.975quant`) %>% 
+      rename_with(.cols = c(mean, sd, LowerCI, UpperCI), ~paste0(kmr, "_PMod_", .x))
+
+
+#############################################
