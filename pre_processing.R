@@ -98,7 +98,7 @@ saveRDS(Stack, file = file.path(OUTPUT_DIR, "raster_stacks/woodyextloss.rds"))
 CropRast <- map(.x = SUs, .f = get_crop, Raster = Stack)
 
 # calculate the number of cells of woody extent and loss in each spatial unit for each KMR
-ZStats_Woody <- map2(.x = SUs, .y = CropRast, .f = get_zonal2, Stat = "sum")
+ZStats_Woody <- map2(.x = SUs, .y = CropRast, .f = get_zonal, Stat = "sum")
 
 # round to the nearest integer
 ZStats_Woody <- map(.x = ZStats_Woody, .f = round)
@@ -139,7 +139,7 @@ CropRastCovsC <- map(.x = SUs, .f = get_crop, Raster = StackCovsC)
 # gc()
 
 # get continuous covariate values
-ZStats_CovsC <- map2(.x = SUs, .y = CropRastCovsC, .f = get_zonal2, Stat = "mean")
+ZStats_CovsC <- map2(.x = SUs, .y = CropRastCovsC, .f = get_zonal, Stat = "mean")
 
 # remove "mean" label from continuous covariates names
 for (i in names(ZStats_CovsC)) {
@@ -183,7 +183,7 @@ saveRDS(StackCovsD, file = file.path(OUTPUT_DIR, "raster_stacks/disc_covs.rds"))
 CropRastCovsD <- map(.x = SUs, .f = get_crop, Raster = StackCovsD)
 
 # get discrete covariate values
-ZStats_CovsD <- map2(.x = SUs, .y = CropRastCovsD, .f = get_zonal2, Stat = "mode") # note here could use Stat = "frac" to get the fraction of each discrete type in each property
+ZStats_CovsD <- map2(.x = SUs, .y = CropRastCovsD, .f = get_zonal, Stat = "mode") # note here could use Stat = "frac" to get the fraction of each discrete type in each property
 
 # remove "mode" label from discrete covariates names and covert to factors
 for (i in names(ZStats_CovsD)) {
