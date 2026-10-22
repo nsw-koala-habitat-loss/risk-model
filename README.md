@@ -1,6 +1,6 @@
 # Modelling deforestation risk and its implications on koala habitats
 
-Author: Yi Fei Chung & Jonathan R. Rhodes
+Author: Anonymous
 
 Code to reproduce the analyses and figures in the manuscript (DOI:).
 
