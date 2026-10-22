@@ -194,6 +194,3 @@ for (i in names(ZStats_CovsD)) {
 # save data
 if(file.exists(file.path(OUTPUT_DIR, "data/ZStats_CovsD.qs"))){file.remove(file.path(OUTPUT_DIR, "data/ZStats_CovsD.qs"))} # replacing all qs with qs2 for compatibility
 qs_save(ZStats_CovsD, file = file.path(OUTPUT_DIR, "data/ZStats_CovsD.qs2"))
-
-
-map(SUs, nrow)
